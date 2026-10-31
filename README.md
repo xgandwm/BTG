@@ -1,0 +1,119 @@
+# 文字框图片生成器（BTG）
+
+一个**单文件、零依赖**的文字框 / 漫画气泡图片生成工具：透明背景 PNG、横排竖排、气泡小尾巴、圆角矩形与椭圆圆框、夜间模式，并可打包成 Android App 安装到手机。
+
+- 网页版：双击 `index.html` 用浏览器打开即用，完全离线。
+- 手机版：仓库内置 Android WebView 壳工程，GitHub Actions 云构建出 APK，导出图片可直接存入系统相册。
+
+---
+
+## 一、网页版使用
+
+### 打开方式
+
+直接用浏览器打开 `index.html`（Chrome / Edge / Safari 均可），无需安装任何环境、无需联网。
+
+### 功能一览
+
+| 分组 | 说明 |
+| --- | --- |
+| 文本 | 输入文字，回车手动换行；可切换**横向 / 竖向**排列 |
+| 竖排设置 | 竖向时可选列序「从右到左 / 从左到右」，并支持**标点旋转**（`，。、！？` 等自动转到格子右上） |
+| 字体 | 系统字体下拉；也可**上传本地 TTF / OTF / WOFF** 字体；字号、字重、颜色、阴影（模糊与颜色） |
+| 排版 | 行距 / 列距、字间距、内边距、水平对齐、垂直对齐 |
+| 画布 | 默认「自动适配文字」；取消勾选可手动填宽高（文字按可用空间自动折行 / 折列） |
+| 框形状 | **圆角矩形**（圆角可调）或**椭圆（圆框）**；粗细、颜色可调 |
+| 尾巴（气泡小角） | 开关、方向（0°=右、90°=下、180°=左、270°=上）、长度、根部宽、形状（弯尾 / 尖角）、弯尾的弯曲度 |
+| 背景 | 默认**透明背景**（预览用棋盘格表示），也可改为纯色 + 不透明度 |
+| 导出 | 1x / 2x / 3x / 4x 倍率导出 PNG（保留透明通道），或「复制图片」到剪贴板 |
+| 主题 | 右上角按钮切换**夜间模式**，默认跟随系统，手动切换后会被记住 |
+
+### 使用技巧
+
+- **透明背景**：保持「透明背景」勾选，导出的 PNG 透明区域是真正的 alpha 通道，可直接贴到漫画、海报上。
+- **气泡小角**：尾巴根部与框是**连通开口**的（根边没有线），这是漫画气泡的正确画法；任意角度都不会穿透框体。
+- **圆框**：选择「椭圆」后文字会自动收缩到椭圆的内接矩形内，不会溢出；此时圆角参数不适用会自动隐藏。
+- **竖屏 / 手机浏览器**：窗口宽度小于 900px 时预览区会**吸顶**，向下翻参数时仍能实时看到画面。
+- **手机浏览器里**：导出通常会走浏览器下载；想直接存入相册请用下面的 Android App。
+
+---
+
+## 二、Android App（APK）
+
+### 怎么拿到 APK
+
+1. 打开仓库的 **Actions** 页面（`https://github.com/xgandwm/BTG/actions`）；
+2. 选择 **Build Android APK** 工作流，点 **Run workflow** 手动触发（推送代码也会自动触发）；
+3. 等待 5–8 分钟（首次构建需下载 Android SDK，会慢一些）；
+4. 进入本次运行记录，在页面底部 **Artifacts** 下载 `textbox-debug-apk`；
+5. 解压得到 `app-debug.apk`，传到手机安装（安装时需允许「未知来源」）。
+
+### App 内的差异
+
+- 完全**离线运行**，网页被打包进 App 内部，不依赖网络；
+- 点「导出 PNG」时，图片会**直接保存到系统相册**的 `Pictures/TextBox` 目录（Android 10+，无需存储权限），并弹出保存提示；
+- 上传字体时可调起系统文件选择器；
+- 深色模式跟随系统，也可在 App 内手动切换并记忆。
+
+### 技术参数
+
+| 项目 | 值 |
+| --- | --- |
+| 包名 | `com.hirakei.textbox` |
+| 最低系统 | Android 10（API 29） |
+| 目标 API | 35 |
+| 构建产物 | `app-debug.apk`（已带调试签名，可直接安装） |
+| 体积 | 约 2–3 MB（纯 WebView 壳，无第三方库） |
+
+---
+
+## 三、目录结构
+
+```
+.
+├── index.html                       网页应用本体（单文件，含全部逻辑与样式）
+├── android/                         Android WebView 壳工程
+│   ├── settings.gradle / build.gradle / gradle.properties
+│   └── app/src/main/
+│       ├── AndroidManifest.xml
+│       ├── java/com/hirakei/textbox/MainActivity.java
+│       └── res/                     图标（自适应图标）与主题
+├── .github/workflows/build-apk.yml  GitHub Actions 云构建工作流
+└── README.md
+```
+
+构建时工作流会把根目录的 `index.html` 复制到 `android/app/src/main/assets/`，因此**只需要维护一份网页文件**。
+
+---
+
+## 四、改完后如何更新
+
+1. 修改根目录的 `index.html`（网页版与 App 共用同一份）；
+2. 提交并推送到 `main` 分支：
+   ```
+   git add -A
+   git commit -m "说明改动"
+   git push origin main
+   ```
+3. Actions 自动构建，下载新的 APK 覆盖安装即可。
+
+也可以在 GitHub 网页端直接编辑 `index.html` 提交，同样会触发构建。
+
+---
+
+## 五、常见问题
+
+**Q：双击打开网页版，上传字体 / 复制图片不起作用？**
+A：以 `file://` 打开时，部分浏览器的剪贴板和字体 API 受限。用 App 就没有这个问题；或者在本地起个静态服务（例如 `python -m http.server`）后用 `http://localhost` 访问。
+
+**Q：手机安装时提示「未知应用」？**
+A：这是 Android 对非商店应用的正常提示，在系统设置里允许该来源一次即可（debug 签名才有此提示）。
+
+**Q：想上架 Google Play？**
+A：当前工作流只出 debug APK（自用足够）。上架需要：release 签名（自己的 keystore）、AAB 格式、targetSdk 35、隐私政策与 512 图标等，可在现有工程上补一个 release 构建步骤。
+
+**Q：能否改成其他包名 / 应用名？**
+A：包名在 `android/app/build.gradle` 的 `applicationId`，应用名在 `android/app/src/main/res/values/strings.xml` 的 `app_name`，图标在 `res/drawable/ic_launcher_foreground.xml`（矢量气泡）。改完推送即会重新构建。
+
+**Q：iOS 可以用吗？**
+A：当前仓库只含 Android 工程。网页版在 iPhone Safari 上可以正常使用（可「添加到主屏幕」当轻量 App）；真机 IPA 需要 Mac + Xcode 另建壳工程。
