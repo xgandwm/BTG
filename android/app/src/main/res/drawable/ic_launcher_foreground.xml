@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 对话气泡：圆角矩形 + 小尾巴 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M32,36 h44 a7,7 0 0 1 7,7 v22 a7,7 0 0 1 -7,7 h-26 l-11,12 3,-12 h-10 a7,7 0 0 1 -7,-7 v-22 a7,7 0 0 1 7,-7 z" />
+    <path
+        android:fillColor="#0D9488"
+        android:pathData="M36,44 m-3,0 a3,3 0 1 0 6,0 a3,3 0 1 0 -6,0 M48,44 m-3,0 a3,3 0 1 0 6,0 a3,3 0 1 0 -6,0 M60,44 m-3,0 a3,3 0 1 0 6,0 a3,3 0 1 0 -6,0" />
+</vector>

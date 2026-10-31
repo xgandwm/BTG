@@ -1,0 +1,31 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.hirakei.textbox'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "com.hirakei.textbox"
+        minSdk 29          // Android 10+：MediaStore 保存相册免存储权限
+        targetSdk 35       // Google Play 上架要求
+        versionCode 1
+        versionName "1.0"
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+}

@@ -1,0 +1,1121 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>文字框图片生成器</title>
+<style>
+  :root{
+    /* 薄荷蓝只保留少量强调：Logo、滑块、聚焦环、主按钮 */
+    --mint-300:#6fe3d2; --mint-400:#2dd4bf; --mint-500:#14b8a6; --mint-600:#0d9488;
+    --bg:#ffffff; --card:#ffffff; --soft:#f5f6f8; --line:#e5e8ec;
+    --ink:#1f2329; --ink-2:#6b7280;
+    --grid:#f1f2f4; --grid-bg:#ffffff;      /* 透明棋盘格 */
+    --thumb:#ffffff; --scroll:#dfe2e6;
+    --shadow:0 12px 28px -22px rgba(17,24,39,.4);
+    --shadow-lg:0 22px 48px -34px rgba(17,24,39,.45);
+    color-scheme:light;
+  }
+  /* ---- 夜间模式 ---- */
+  [data-theme=dark]{
+    --mint-300:#7ff0e2; --mint-400:#2dd4bf; --mint-500:#14b8a6; --mint-600:#0f9c8e;
+    --bg:#14171a; --card:#1c2024; --soft:#23282e; --line:#2b3037;
+    --ink:#e8ebef; --ink-2:#9aa4af;
+    --grid:#2b3037; --grid-bg:#20252a;
+    --thumb:#e8ebef; --scroll:#3a4048;
+    --shadow:0 12px 28px -22px rgba(0,0,0,.9);
+    --shadow-lg:0 22px 48px -34px rgba(0,0,0,.9);
+    color-scheme:dark;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; color:var(--ink); background:var(--bg);
+    font:14px/1.55 "Microsoft YaHei","PingFang SC",system-ui,-apple-system,sans-serif;
+  }
+  .app{display:flex; min-height:100vh}
+
+  /* ---- 预览区 ---- */
+  .preview{
+    flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    padding:34px 28px; gap:16px; min-width:0;
+  }
+  .preview-head{display:flex; align-items:center; gap:10px; flex-wrap:wrap; justify-content:center}
+  .chip{
+    display:inline-flex; align-items:center; gap:7px; font-size:12px; font-weight:700;
+    color:var(--ink-2); background:var(--card); border:1px solid var(--line);
+    padding:5px 13px; border-radius:99px; box-shadow:var(--shadow);
+  }
+  .chip::before{
+    content:''; width:7px; height:7px; border-radius:50%;
+    background:var(--mint-400); box-shadow:0 0 0 3px rgba(45,212,191,.22);
+  }
+  .info{
+    font-size:12px; color:var(--ink-2); background:var(--card);
+    border:1px solid var(--line); padding:5px 13px; border-radius:99px;
+    font-variant-numeric:tabular-nums; box-shadow:var(--shadow);
+  }
+  .stage{
+    padding:14px; border-radius:22px; max-width:100%; display:flex;
+    background:var(--card); border:1px solid var(--line);
+    box-shadow:var(--shadow-lg);
+  }
+  .board{
+    background-image:
+      linear-gradient(45deg,var(--grid) 25%,transparent 25%,transparent 75%,var(--grid) 75%),
+      linear-gradient(45deg,var(--grid) 25%,transparent 25%,transparent 75%,var(--grid) 75%);
+    background-size:18px 18px; background-position:0 0,9px 9px; background-color:var(--grid-bg);
+    border-radius:13px; padding:10px; display:flex; max-width:100%;
+    box-shadow:inset 0 0 0 1px var(--line);
+  }
+  canvas{display:block; max-width:100%; height:auto}
+
+  /* ---- 右侧面板 ---- */
+  .panel{
+    width:352px; flex:none; padding:20px 16px 36px; overflow:auto; max-height:100vh;
+    background:var(--bg); border-left:1px solid var(--line);
+  }
+  .brand{display:flex; align-items:center; gap:12px; margin:2px 4px 18px}
+  .logo{
+    width:42px; height:42px; border-radius:13px; flex:none; display:grid; place-items:center;
+    background:linear-gradient(135deg,#7ff0e2 0%,#14b8a6 58%,#0d9488 100%);
+    box-shadow:0 12px 22px -12px rgba(13,148,136,.9);
+  }
+  .logo i{
+    width:21px; height:13px; display:block; position:relative;
+    border:2px solid rgba(255,255,255,.95); border-radius:5px;
+  }
+  .logo i::after{
+    content:''; position:absolute; left:3px; bottom:-7px;
+    border:4px solid transparent; border-top:5px solid rgba(255,255,255,.95);
+  }
+  .brand h1{font-size:17px; margin:0; letter-spacing:.3px; color:var(--ink)}
+  .brand p{margin:3px 0 0; font-size:12px; color:var(--ink-2)}
+
+  /* 主题切换：亮色显示月牙（点一下进夜间），暗色显示太阳 */
+  .theme-btn{
+    margin-left:auto; width:34px; height:34px; flex:none; padding:0;
+    border-radius:11px; border:1px solid var(--line); background:var(--soft);
+    color:var(--ink-2); display:grid; place-items:center; cursor:pointer; box-shadow:none;
+  }
+  .theme-btn:hover{background:var(--card)}
+  .theme-btn i{
+    width:13px; height:13px; border-radius:50%; display:block;
+    background:transparent; box-shadow:inset 5px -3px 0 1px currentColor;
+  }
+  [data-theme=dark] .theme-btn i{
+    background:currentColor; box-shadow:0 0 0 3px rgba(154,164,175,.22);
+  }
+
+  .group{
+    background:var(--card); border:1px solid var(--line); border-radius:14px;
+    padding:12px 13px 14px; margin-bottom:12px;
+  }
+  .gt{
+    display:flex; align-items:center; gap:8px; margin:2px 0 10px;
+    font-size:12px; font-weight:800; color:var(--ink); letter-spacing:1px;
+  }
+  .gt::before{
+    content:''; width:3px; height:13px; border-radius:2px;
+    background:linear-gradient(var(--mint-300),var(--mint-500));
+  }
+  .row{display:flex; align-items:center; gap:10px; margin:9px 0}
+  .row>label{flex:none; width:72px; color:var(--ink-2); font-size:13px}
+  .row .val{
+    flex:none; min-width:48px; text-align:center; font-size:12px; color:var(--ink);
+    background:var(--card); border:1px solid var(--line); border-radius:7px;
+    padding:2px 6px; font-variant-numeric:tabular-nums;
+  }
+  input[type=range]{
+    flex:1; min-width:0; height:6px; border-radius:99px; outline:none; cursor:pointer;
+    -webkit-appearance:none; appearance:none;
+    background:linear-gradient(90deg,var(--mint-400) 0 var(--fill,50%),var(--soft) var(--fill,50%) 100%);
+  }
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none; width:16px; height:16px; border-radius:50%; cursor:pointer;
+    background:var(--thumb); border:3px solid var(--mint-500);
+    box-shadow:0 3px 8px -2px rgba(13,148,136,.7);
+  }
+  input[type=range]::-moz-range-thumb{
+    width:14px; height:14px; border-radius:50%; cursor:pointer;
+    background:var(--thumb); border:3px solid var(--mint-500);
+  }
+  input[type=number], select, textarea{
+    width:100%; padding:7px 10px; border:1px solid var(--line); border-radius:10px;
+    background:var(--card); color:var(--ink); font:inherit; outline:none; transition:.15s;
+  }
+  input[type=number]:focus, select:focus, textarea:focus{
+    border-color:var(--mint-400); background:var(--card);
+    box-shadow:0 0 0 3px rgba(45,212,191,.18);
+  }
+  input[type=file]{font-size:12px; color:var(--ink-2)}
+  textarea{resize:vertical; min-height:82px; line-height:1.6}
+  input[type=color]{
+    width:42px; height:30px; padding:2px; border:1px solid var(--line);
+    border-radius:9px; background:var(--card); cursor:pointer;
+  }
+  input[type=color]::-webkit-color-swatch-wrapper{padding:0}
+  input[type=color]::-webkit-color-swatch{border:none; border-radius:7px}
+  .chk{
+    display:flex; align-items:center; gap:7px; color:var(--ink-2);
+    font-size:13px; cursor:pointer; user-select:none;
+  }
+  .chk input{accent-color:var(--mint-500); width:15px; height:15px}
+  .seg{
+    display:flex; gap:4px; padding:3px; width:100%; border-radius:11px;
+    background:var(--soft); border:1px solid var(--line);
+  }
+  .seg label{flex:1; cursor:pointer; border-radius:8px; overflow:hidden}
+  .seg input{display:none}
+  .seg span{display:block; text-align:center; padding:6px 0; font-size:13px; color:var(--ink-2)}
+  .seg input:checked + span{
+    background:var(--card); color:var(--ink); font-weight:700;
+    box-shadow:0 2px 8px -5px rgba(17,24,39,.5);
+  }
+  .btns{display:flex; gap:10px; margin-top:12px}
+  button{
+    flex:1; padding:11px 12px; border-radius:11px; border:1px solid transparent;
+    font:inherit; font-weight:700; cursor:pointer; color:#fff; transition:.15s;
+    background:linear-gradient(135deg,#43e0cd,#0d9488);
+    box-shadow:0 10px 20px -12px rgba(13,148,136,.9);
+  }
+  button:hover{filter:brightness(1.05); transform:translateY(-1px)}
+  button.ghost{background:var(--card); color:var(--ink); border-color:var(--line); box-shadow:none}
+  button.ghost:hover{background:var(--soft)}
+  button:active{transform:translateY(1px)}
+  .hint{
+    font-size:12px; color:var(--ink-2); background:var(--soft);
+    border:1px solid var(--line); border-radius:9px;
+    padding:7px 9px; margin-top:10px; line-height:1.5;
+  }
+  .panel::-webkit-scrollbar{width:10px}
+  .panel::-webkit-scrollbar-track{background:transparent}
+  .panel::-webkit-scrollbar-thumb{
+    background:var(--scroll); border-radius:99px;
+    border:3px solid transparent; background-clip:content-box;
+  }
+  /* ---- 窄屏（竖屏手机）：预览吸顶，向下翻参数时预览始终可见 ---- */
+  @media (max-width:900px){
+    .app{flex-direction:column}
+    .preview{
+      position:sticky; top:0; z-index:6;
+      padding:10px 12px; gap:8px;
+      background:var(--bg);
+      backdrop-filter:blur(8px);
+      border-bottom:1px solid var(--line);
+      box-shadow:0 12px 24px -20px rgba(17,24,39,.8);
+    }
+    .stage{padding:8px; border-radius:16px; box-shadow:none}
+    .board{padding:8px; border-radius:10px}
+    canvas{max-height:38vh; object-fit:contain}  /* 限制预览高度，比例由 object-fit 保证 */
+    .panel{
+      width:100%; border-left:none; border-top:none;
+      max-height:none; box-shadow:none; padding-top:14px;
+    }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <section class="preview">
+    <div class="preview-head">
+      <span class="chip">实时预览</span>
+      <span class="info" id="info"></span>
+    </div>
+    <div class="stage"><div class="board"><canvas id="cv"></canvas></div></div>
+  </section>
+
+  <aside class="panel">
+    <div class="brand">
+      <div class="logo"><i></i></div>
+      <div>
+        <h1>文字框图片生成器</h1>
+        <p>透明背景 · 横竖排 · 气泡小角 · 圆框</p>
+      </div>
+      <button class="theme-btn" id="btnTheme" type="button" title="切换夜间模式" aria-label="切换夜间模式"><i></i></button>
+    </div>
+
+    <div class="group">
+      <div class="gt">文本</div>
+      <textarea id="text" placeholder="输入文字，回车可手动换行">春风又绿江南岸
+明月何时照我还</textarea>
+      <div class="row" style="margin-top:8px">
+        <label>排列方向</label>
+        <div class="seg">
+          <label><input type="radio" name="direction" value="horizontal" checked><span>横向</span></label>
+          <label><input type="radio" name="direction" value="vertical"><span>竖向</span></label>
+        </div>
+      </div>
+      <div class="row" id="rowColOrder">
+        <label>列顺序</label>
+        <select id="colOrder">
+          <option value="rtl">从右到左</option>
+          <option value="ltr">从左到右</option>
+        </select>
+      </div>
+      <div class="row" id="rowPunct">
+        <label>&nbsp;</label>
+        <label class="chk"><input type="checkbox" id="rotatePunct" checked> 竖排标点旋转</label>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="gt">字体</div>
+      <select id="fontFamily">
+        <option value='"Microsoft YaHei"'>微软雅黑</option>
+        <option value='"PingFang SC"'>苹方</option>
+        <option value='"SimHei"'>黑体</option>
+        <option value='"SimSun"'>宋体</option>
+        <option value='"KaiTi"'>楷体</option>
+        <option value='"STKaiti"'>华文楷体</option>
+        <option value='"FangSong"'>仿宋</option>
+        <option value='"DengXian"'>等线</option>
+        <option value='"Source Han Serif SC", serif'>思源宋体</option>
+        <option value='"Source Han Sans SC", sans-serif'>思源黑体</option>
+        <option value='Arial'>Arial</option>
+        <option value='"Times New Roman"'>Times New Roman</option>
+        <option value='Georgia'>Georgia</option>
+        <option value='Impact'>Impact</option>
+      </select>
+      <div class="row">
+        <label>自定义</label>
+        <input type="file" id="fontFile" accept=".ttf,.otf,.woff,.woff2" style="font-size:12px">
+      </div>
+      <div class="row">
+        <label>字号</label>
+        <input type="range" id="fontSize" min="8" max="160" step="1" value="48">
+        <span class="val" id="fontSizeVal">48</span>
+      </div>
+      <div class="row">
+        <label>字重</label>
+        <select id="fontWeight">
+          <option value="400">常规</option>
+          <option value="700" selected>加粗</option>
+        </select>
+      </div>
+      <div class="row">
+        <label>颜色</label>
+        <input type="color" id="color" value="#1f2329">
+        <label class="chk"><input type="checkbox" id="shadow"> 阴影</label>
+      </div>
+      <div class="row">
+        <label>阴影模糊</label>
+        <input type="range" id="shadowBlur" min="0" max="60" step="1" value="12">
+        <span class="val" id="shadowBlurVal">12</span>
+      </div>
+      <div class="row">
+        <label>阴影色</label>
+        <input type="color" id="shadowColor" value="#000000">
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="gt">排版</div>
+      <div class="row">
+        <label>水平对齐</label>
+        <select id="alignH">
+          <option value="left">左</option>
+          <option value="center" selected>居中</option>
+          <option value="right">右</option>
+        </select>
+      </div>
+      <div class="row">
+        <label>垂直对齐</label>
+        <select id="alignV">
+          <option value="top">上</option>
+          <option value="middle" selected>居中</option>
+          <option value="bottom">下</option>
+        </select>
+      </div>
+      <div class="row">
+        <label>行 / 列距</label>
+        <input type="range" id="lineHeight" min="0.6" max="3" step="0.05" value="1.3">
+        <span class="val" id="lineHeightVal">1.30</span>
+      </div>
+      <div class="row">
+        <label>字间距</label>
+        <input type="range" id="letterSpacing" min="-20" max="80" step="1" value="4">
+        <span class="val" id="letterSpacingVal">4</span>
+      </div>
+      <div class="row">
+        <label>内边距</label>
+        <input type="range" id="padding" min="0" max="200" step="1" value="40">
+        <span class="val" id="paddingVal">40</span>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="gt">画布</div>
+      <div class="row">
+        <label>&nbsp;</label>
+        <label class="chk"><input type="checkbox" id="autoSize" checked> 自动适配文字</label>
+      </div>
+      <div class="row">
+        <label>宽</label>
+        <input type="number" id="width" min="16" max="4000" value="600" disabled>
+        <label style="width:auto">高</label>
+        <input type="number" id="height" min="16" max="4000" value="400" disabled>
+      </div>
+      <div class="row">
+        <label>&nbsp;</label>
+        <label class="chk"><input type="checkbox" id="bgTransparent" checked> 透明背景</label>
+      </div>
+      <div class="row">
+        <label>背景色</label>
+        <input type="color" id="bgColor" value="#ffffff">
+      </div>
+      <div class="row">
+        <label>不透明度</label>
+        <input type="range" id="bgOpacity" min="0" max="100" step="1" value="100">
+        <span class="val" id="bgOpacityVal">100</span>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="gt">框形状</div>
+      <div class="row">
+        <label>形状</label>
+        <select id="shape">
+          <option value="rect" selected>圆角矩形</option>
+          <option value="ellipse">椭圆（圆框）</option>
+        </select>
+      </div>
+      <div class="row" id="rowRadius">
+        <label>圆角</label>
+        <input type="range" id="radius" min="0" max="200" step="1" value="16">
+        <span class="val" id="radiusVal">16</span>
+      </div>
+      <div class="row">
+        <label>粗细</label>
+        <input type="range" id="borderWidth" min="0" max="40" step="1" value="6">
+        <span class="val" id="borderWidthVal">6</span>
+      </div>
+      <div class="row">
+        <label>颜色</label>
+        <input type="color" id="borderColor" value="#1f2329">
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="gt">尾巴（气泡小角）</div>
+      <div class="row">
+        <label>&nbsp;</label>
+        <label class="chk"><input type="checkbox" id="tailOn" checked> 显示尾巴</label>
+      </div>
+      <div id="tailDetails">
+        <div class="row">
+          <label>方向</label>
+          <input type="range" id="tailAngle" min="0" max="359" step="1" value="45">
+          <span class="val" id="tailAngleVal">45°</span>
+        </div>
+        <div class="row">
+          <label>长度</label>
+          <input type="range" id="tailLen" min="0" max="300" step="1" value="80">
+          <span class="val" id="tailLenVal">80</span>
+        </div>
+        <div class="row">
+          <label>根部宽</label>
+          <input type="range" id="tailWidth" min="2" max="240" step="1" value="34">
+          <span class="val" id="tailWidthVal">34</span>
+        </div>
+        <div class="row">
+          <label>形状</label>
+          <select id="tailShape">
+            <option value="curve" selected>弯尾</option>
+            <option value="triangle">尖角</option>
+          </select>
+        </div>
+        <div class="row" id="rowCurl">
+          <label>弯曲度</label>
+          <input type="range" id="tailCurl" min="-80" max="80" step="1" value="25">
+          <span class="val" id="tailCurlVal">0.25</span>
+        </div>
+      </div>
+      <div class="hint">0°=右，90°=下，180°=左，270°=上；尾巴根部与边框连通。</div>
+    </div>
+
+    <div class="group">
+      <div class="gt">导出</div>
+      <div class="row">
+        <label>倍数</label>
+        <select id="exportScale">
+          <option value="1">1x</option>
+          <option value="2" selected>2x</option>
+          <option value="3">3x</option>
+          <option value="4">4x</option>
+        </select>
+      </div>
+      <div class="btns">
+        <button id="btnPng">导出 PNG</button>
+        <button id="btnCopy" class="ghost">复制图片</button>
+      </div>
+      <div class="hint" id="msg">透明区域以棋盘格显示；PNG 保留透明通道。</div>
+    </div>
+  </aside>
+</div>
+
+<script>
+(function(){
+  'use strict';
+
+  var $ = function(id){ return document.getElementById(id); };
+  var cv = $('cv');
+  var customFontName = null;
+
+  // ---------- 状态读取 ----------
+  function num(id){ return parseFloat($(id).value); }
+  function str(id){ return $(id).value; }
+  function chk(id){ return $(id).checked; }
+  function radio(name){
+    var el = document.querySelector('input[name="'+name+'"]:checked');
+    return el ? el.value : '';
+  }
+
+  function state(){
+    return {
+      text: str('text'),
+      direction: radio('direction'),
+      colOrder: str('colOrder'),
+      rotatePunct: chk('rotatePunct'),
+      fontFamily: customFontName ? ('"' + customFontName + '"') : str('fontFamily'),
+      fontSize: num('fontSize'),
+      fontWeight: str('fontWeight'),
+      color: str('color'),
+      shadow: chk('shadow'),
+      shadowBlur: num('shadowBlur'),
+      shadowColor: str('shadowColor'),
+      alignH: str('alignH'),
+      alignV: str('alignV'),
+      lineHeight: num('lineHeight'),
+      letterSpacing: num('letterSpacing'),
+      padding: num('padding'),
+      autoSize: chk('autoSize'),
+      width: num('width'),
+      height: num('height'),
+      bgTransparent: chk('bgTransparent'),
+      bgColor: str('bgColor'),
+      bgOpacity: num('bgOpacity') / 100,
+      borderWidth: num('borderWidth'),
+      borderColor: str('borderColor'),
+      shape: str('shape'),
+      radius: num('radius'),
+      tailOn: chk('tailOn'),
+      tailAngle: num('tailAngle'),
+      tailLen: num('tailLen'),
+      tailWidth: num('tailWidth'),
+      tailShape: str('tailShape'),
+      tailCurl: num('tailCurl') / 100
+    };
+  }
+
+  function fontOf(s){ return s.fontWeight + ' ' + s.fontSize + 'px ' + s.fontFamily; }
+
+  // ---------- 排版 ----------
+  // 横排：把文本按可用宽度折成多行；竖排：按可用高度折成多列
+  function layout(ctx, s, maxW, maxH){
+    var ls = s.letterSpacing;
+    var vertical = s.direction === 'vertical';
+    var minStep = s.fontSize * 0.35; // 竖排下给窄字符(i、l 等)一个最小步进，避免挤在一起
+    var paragraphs = s.text.split('\n');
+    var blocks = [];                 // 每项 {chars:[{ch,adv}], size:主方向长度}
+
+    function advOf(ch){
+      var w = ctx.measureText(ch).width;
+      return (vertical ? Math.max(w, minStep) : w) + ls;
+    }
+
+    var limit = vertical ? maxH : maxW;
+    var cur = [], curLen = 0;
+    function flush(){
+      blocks.push({ chars: cur, size: Math.max(0, curLen - ls) });
+      cur = []; curLen = 0;
+    }
+    function widthOf(txt){
+      var cs = Array.from(txt), w = 0;
+      for (var i = 0; i < cs.length; i++) w += advOf(cs[i]);
+      return cs.length ? w - ls : 0;
+    }
+
+    for (var p = 0; p < paragraphs.length; p++){
+      var para = paragraphs[p];
+      if (!para.length){ blocks.push({ chars: [], size: 0 }); continue; }
+
+      // 横排按空格切成整词，避免英文被拆断；竖排逐字成列
+      var tokens = vertical
+        ? Array.from(para)
+        : (para.match(/\s+|\S+/g) || []);
+
+      for (var t = 0; t < tokens.length; t++){
+        var tk = tokens[t];
+        if (cur.length && curLen + widthOf(tk) > limit){
+          flush();
+          if (!vertical && /^\s+$/.test(tk)) continue; // 行首空白丢弃
+        }
+        var cs = Array.from(tk);
+        for (var i = 0; i < cs.length; i++){
+          var adv = advOf(cs[i]);
+          if (cur.length && curLen + adv - ls > limit) flush(); // 超长词强行断行
+          cur.push({ ch: cs[i], adv: adv });
+          curLen += adv;
+        }
+      }
+      flush();
+    }
+
+    var step = s.fontSize * s.lineHeight; // 行距（横排）/ 列距（竖排）
+    var mainLen = 0, crossLen = 0;
+    for (var b = 0; b < blocks.length; b++){
+      var blk = blocks[b];
+      mainLen += blk.chars.length ? step : step * 0.6; // 空行保留半行空白
+      if (blk.size > crossLen) crossLen = blk.size;
+    }
+    return { blocks: blocks, step: step, mainLen: mainLen, crossLen: crossLen };
+  }
+
+  function contentSize(lo, s){
+    // 返回内容区（不含 padding 与边框）宽高
+    if (s.direction === 'vertical'){
+      return { w: Math.max(0, Math.ceil(lo.mainLen)), h: Math.max(0, Math.ceil(lo.crossLen)) };
+    }
+    return { w: Math.max(0, Math.ceil(lo.crossLen)), h: Math.max(0, Math.ceil(lo.mainLen)) };
+  }
+
+  function measureCanvas(){
+    var c = document.createElement('canvas');
+    return c.getContext('2d');
+  }
+
+  // ---------- 尾巴（气泡小角）几何 ----------
+  // 圆角矩形边界参数化：s 为顺时针弧长（从顶边左端 (x+r, y) 起算）。
+  // pointAt(s) 给坐标；intersect(dx,dy) 给中心射线与真实边界（直线段+四角弧）的交点及其参数 s
+  function rrBoundary(box, radius){
+    var hw = box.w / 2, hh = box.h / 2;
+    var x = box.x, y = box.y, w = box.w, h = box.h;
+    var r = Math.max(0, Math.min(radius, hw, hh));
+    var sTop = Math.max(0, w - 2 * r);
+    var sSide = Math.max(0, h - 2 * r);
+    var sArc = Math.PI * r / 2;
+    var L = 2 * sTop + 2 * sSide + 4 * sArc;
+
+    function pointAt(s){
+      s = ((s % L) + L) % L;
+      var a;
+      if (s < sTop) return { x: x + r + s, y: y };                    // 顶边 →
+      s -= sTop;
+      if (s < sArc){ a = -Math.PI / 2 + s / r;                        // 右上弧 ↘
+        return { x: x + w - r + r * Math.cos(a), y: y + r + r * Math.sin(a) }; }
+      s -= sArc;
+      if (s < sSide) return { x: x + w, y: y + r + s };               // 右边 ↓
+      s -= sSide;
+      if (s < sArc){ a = s / r;                                       // 右下弧 ↙
+        return { x: x + w - r + r * Math.cos(a), y: y + h - r + r * Math.sin(a) }; }
+      s -= sArc;
+      if (s < sTop) return { x: x + w - r - s, y: y + h };            // 底边 ←
+      s -= sTop;
+      if (s < sArc){ a = Math.PI / 2 + s / r;                         // 左下弧 ↖
+        return { x: x + r + r * Math.cos(a), y: y + h - r + r * Math.sin(a) }; }
+      s -= sArc;
+      if (s < sSide) return { x: x, y: y + h - r - s };               // 左边 ↑
+      s -= sSide;
+      a = Math.PI + s / r;                                            // 左上弧 ↗
+      return { x: x + r + r * Math.cos(a), y: y + r + r * Math.sin(a) };
+    }
+
+    function intersect(dx, dy){
+      var cx = x + hw, cy = y + hh;
+      var hw2 = hw - r, hh2 = hh - r;          // 角圆心构成的内缩矩形（判断直线段范围用）
+      var adx = Math.max(1e-9, Math.abs(dx)), ady = Math.max(1e-9, Math.abs(dy));
+      // 直线段在外接矩形的四条边上，先与外接矩形求交
+      var tEx = hw / adx, tEy = hh / ady;
+      var tE = Math.min(tEx, tEy);
+      var px = cx + dx * tE, py = cy + dy * tE;
+      var onSide = (tEx <= tEy) ? (Math.abs(py - cy) <= hh2 + 1e-6)   // 左/右边
+                                : (Math.abs(px - cx) <= hw2 + 1e-6);  // 上/下边
+      if (onSide){
+        var sp;
+        if (tEx <= tEy){
+          sp = dx > 0 ? sTop + sArc + (py - (y + r))                        // 右边
+                      : 2 * sTop + 3 * sArc + sSide + ((y + h - r) - py);   // 左边
+        } else {
+          sp = dy > 0 ? sTop + 2 * sArc + sSide + ((x + w - r) - px)        // 底边
+                      : (px - (x + r));                                     // 顶边
+        }
+        return { x: px, y: py, s: ((sp % L) + L) % L };
+      }
+      // 交点在角区：与对应角圆求交，取落在弧段角度范围内的根
+      var ox = cx + (dx > 0 ? hw2 : -hw2), oy = cy + (dy > 0 ? hh2 : -hh2);
+      var fx = cx - ox, fy = cy - oy;
+      var b = fx * dx + fy * dy;
+      var c0 = fx * fx + fy * fy - r * r;
+      var disc = Math.max(0, b * b - c0);
+      var sq = Math.sqrt(disc);
+      var a0, base;
+      if (dy < 0){ if (dx >= 0){ a0 = -Math.PI / 2; base = sTop; } else { a0 = Math.PI; base = 2 * sTop + 3 * sArc + 2 * sSide; } }
+      else       { if (dx >= 0){ a0 = 0; base = sTop + sArc + sSide; } else { a0 = Math.PI / 2; base = 2 * sTop + 2 * sArc + sSide; } }
+
+      var cands = [];
+      if (-b - sq > 1e-9) cands.push(-b - sq);
+      if (-b + sq > 1e-9) cands.push(-b + sq);
+      if (!cands.length) cands.push(Math.max(0, -b));   // 数值兜底
+      var best = null;
+      for (var i = cands.length - 1; i >= 0; i--){
+        var t = cands[i];
+        var ang = Math.atan2(cy + dy * t - oy, cx + dx * t - ox) - a0;
+        while (ang < -1e-6) ang += Math.PI * 2;
+        if (ang <= Math.PI / 2 + 1e-6){                 // 在弧段上
+          var sp2 = base + r * Math.min(Math.max(ang, 0), Math.PI / 2);
+          if (!best || t > best.t) best = { t: t, s: sp2 };  // 取沿射线更远的合法交点
+        }
+      }
+      if (!best){                                       // 兜底：取外接矩形交点的参数
+        best = { t: tE, s: 0 };
+      }
+      var fx2 = cx + dx * best.t, fy2 = cy + dy * best.t;
+      return { x: fx2, y: fy2, s: ((best.s % L) + L) % L };
+    }
+
+    return { r: r, L: L, pointAt: pointAt, intersect: intersect };
+  }
+
+  // 椭圆边界：离散成折线并按累积弧长参数化，接口与 rrBoundary 一致
+  function ellipseBoundary(box){
+    var a = Math.max(0.5, box.w / 2), b = Math.max(0.5, box.h / 2);
+    var cx = box.x + box.w / 2, cy = box.y + box.h / 2;
+    var N = 720;
+    var px = new Array(N + 1), py = new Array(N + 1), cum = new Array(N + 1);
+    px[0] = cx + a; py[0] = cy; cum[0] = 0;
+    for (var i = 1; i <= N; i++){
+      var th = i * 2 * Math.PI / N;
+      px[i] = cx + a * Math.cos(th); py[i] = cy + b * Math.sin(th);
+      cum[i] = cum[i - 1] + Math.hypot(px[i] - px[i - 1], py[i] - py[i - 1]);
+    }
+    var L = cum[N];
+
+    function pointAt(s){
+      s = ((s % L) + L) % L;
+      var lo = 0, hi = N;
+      while (lo < hi){
+        var mid = (lo + hi + 1) >> 1;
+        if (cum[mid] <= s) lo = mid; else hi = mid - 1;
+      }
+      if (lo >= N) return { x: px[N], y: py[N] };
+      var seg = cum[lo + 1] - cum[lo];
+      var f = seg > 1e-12 ? (s - cum[lo]) / seg : 0;
+      return { x: px[lo] + (px[lo + 1] - px[lo]) * f, y: py[lo] + (py[lo + 1] - py[lo]) * f };
+    }
+
+    function intersect(dx, dy){
+      var q = (dx * dx) / (a * a) + (dy * dy) / (b * b);
+      var t = q > 1e-12 ? 1 / Math.sqrt(q) : 0;
+      var qx = cx + dx * t, qy = cy + dy * t;
+      var th = Math.atan2((qy - cy) / b, (qx - cx) / a);
+      if (th < 0) th += 2 * Math.PI;
+      var fi = th / (2 * Math.PI) * N;
+      var i0 = Math.floor(fi) % N, i1 = (i0 + 1) % N, fr = fi - Math.floor(fi);
+      var c0 = cum[i0], c1 = i1 === 0 ? L : cum[i1];
+      return { x: qx, y: qy, s: ((c0 + (c1 - c0) * fr) % L + L) % L };
+    }
+
+    return { r: 0, L: L, pointAt: pointAt, intersect: intersect };
+  }
+
+  function boundaryOf(box, s){
+    return s.shape === 'ellipse' ? ellipseBoundary(box) : rrBoundary(box, s.radius);
+  }
+
+  // 基点与根部两点都取真实边界上的点（按弧长偏移），保证尾巴与框贴合
+  function tailGeom(box, s){
+    if (!s.tailOn || s.tailLen <= 0 || s.tailWidth <= 0) return null;
+    var a = s.tailAngle * Math.PI / 180;
+    var dx = Math.cos(a), dy = Math.sin(a);
+    var bd = boundaryOf(box, s);
+    var P0 = bd.intersect(dx, dy);
+    var half = s.tailWidth / 2;
+    var sA = P0.s + half, sB = P0.s - half;      // A 在顺时针前方，B 在后方
+    var A = bd.pointAt(sA), B = bd.pointAt(sB);
+    var T = { x: P0.x + dx * s.tailLen, y: P0.y + dy * s.tailLen };
+
+    var curl = s.tailCurl * s.tailLen;
+    var nx = -dy, ny = dx;
+    var C1 = { x: A.x + dx * s.tailLen * 0.65 + nx * curl, y: A.y + dy * s.tailLen * 0.65 + ny * curl };
+    var C2 = { x: B.x + dx * s.tailLen * 0.65 + nx * curl, y: B.y + dy * s.tailLen * 0.65 + ny * curl };
+
+    var minX = Math.min(A.x, B.x, T.x, C1.x, C2.x), maxX = Math.max(A.x, B.x, T.x, C1.x, C2.x);
+    var minY = Math.min(A.y, B.y, T.y, C1.y, C2.y), maxY = Math.max(A.y, B.y, T.y, C1.y, C2.y);
+
+    return {
+      bd: bd, sA: sA, sB: sB,
+      A: A, B: B, T: T, C1: C1, C2: C2,
+      outer: {
+        l: Math.max(0, box.x - minX),
+        t: Math.max(0, box.y - minY),
+        r: Math.max(0, maxX - (box.x + box.w)),
+        b: Math.max(0, maxY - (box.y + box.h))
+      }
+    };
+  }
+
+  function computeGeometry(s){
+    var m = measureCanvas();
+    m.font = fontOf(s);
+    var bw = s.borderWidth;
+    var pad = s.padding;
+    var lo, cw, ch, W, H, box, tg;
+
+    var ell = s.shape === 'ellipse';
+    var K = Math.SQRT2;                 // 椭圆的最大内接矩形缩放系数
+
+    if (s.autoSize){
+      lo = layout(m, s, Infinity, Infinity);
+      var cs = contentSize(lo, s);
+      cw = cs.w; ch = cs.h;
+      // 椭圆模式下文字块（含内边距与边框）内接于椭圆
+      var boxW = ell ? Math.max(1, Math.round(K * (cw + pad * 2 + bw * 2)))
+                     : Math.max(1, Math.round(cw + pad * 2 + bw * 2));
+      var boxH = ell ? Math.max(1, Math.round(K * (ch + pad * 2 + bw * 2)))
+                     : Math.max(1, Math.round(ch + pad * 2 + bw * 2));
+      var probe = tailGeom({ x: 0, y: 0, w: boxW, h: boxH }, s);
+      var out = probe ? probe.outer : { l: 0, t: 0, r: 0, b: 0 };
+      W = Math.max(1, Math.round(boxW + out.l + out.r));
+      H = Math.max(1, Math.round(boxH + out.t + out.b));
+      box = { x: out.l, y: out.t, w: boxW, h: boxH };
+      tg = tailGeom(box, s);
+    } else {
+      W = Math.max(1, Math.round(s.width));
+      H = Math.max(1, Math.round(s.height));
+      var o = { l: 0, t: 0, r: 0, b: 0 };
+      for (var it = 0; it < 3; it++){   // 尾巴外扩与框位置互相依赖，迭代收敛
+        box = { x: o.l, y: o.t, w: Math.max(1, W - o.l - o.r), h: Math.max(1, H - o.t - o.b) };
+        tg = tailGeom(box, s);
+        if (!tg) break;
+        o = tg.outer;
+      }
+      box = { x: o.l, y: o.t, w: Math.max(1, W - o.l - o.r), h: Math.max(1, H - o.t - o.b) };
+      tg = tailGeom(box, s);
+      cw = ell ? Math.max(0, box.w / K - bw * 2 - pad * 2)
+               : Math.max(0, box.w - bw * 2 - pad * 2);
+      ch = ell ? Math.max(0, box.h / K - bw * 2 - pad * 2)
+               : Math.max(0, box.h - bw * 2 - pad * 2);
+      lo = layout(m, s, cw, ch);
+    }
+    return { W: W, H: H, box: box, cw: cw, ch: ch, lo: lo, bw: bw, pad: pad, tail: tg };
+  }
+
+  // ---------- 绘制 ----------
+  function rrPath(ctx, x, y, w, h, r){   // 只添加路径，不调用 beginPath
+    r = Math.max(0, Math.min(r, w / 2, h / 2));
+    if (ctx.roundRect){ ctx.roundRect(x, y, w, h, r); return; }
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h); ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+  }
+
+  // 无尾巴时的框轮廓；inset 为描边内缩量（描边落在边界内侧）
+  function shapePath(ctx, s, g, inset){
+    var box = g.box;
+    if (s.shape === 'ellipse'){
+      ctx.ellipse(box.x + box.w / 2, box.y + box.h / 2,
+                  Math.max(0.5, box.w / 2 - inset), Math.max(0.5, box.h / 2 - inset),
+                  0, 0, Math.PI * 2);
+    } else {
+      rrPath(ctx, box.x + inset, box.y + inset,
+             Math.max(1, box.w - inset * 2), Math.max(1, box.h - inset * 2),
+             Math.max(0, s.radius - inset));
+    }
+  }
+
+  // 气泡整体轮廓：沿框边框顺时针绕行（跳过尾巴段），经尾巴 B→T→A 闭合。
+  // 单一路径，fill / stroke 各一次：没有根边线，也没有穿过框内的内部线
+  function bubblePath(ctx, s, g){
+    var tg = g.tail, bd = tg.bd;
+    var start = tg.sA;
+    var end = tg.sB; if (end <= start) end += bd.L;
+    var total = end - start;
+    var p = bd.pointAt(start);
+    ctx.moveTo(p.x, p.y);
+    var steps = Math.max(8, Math.ceil(total / 2));   // 边界采样，弧线平滑
+    for (var i = 1; i < steps; i++){
+      var q = bd.pointAt(start + total * i / steps);
+      ctx.lineTo(q.x, q.y);
+    }
+    var pB = bd.pointAt(tg.sB);
+    ctx.lineTo(pB.x, pB.y);
+    if (s.tailShape === 'triangle'){
+      ctx.lineTo(tg.T.x, tg.T.y);
+      ctx.lineTo(tg.A.x, tg.A.y);
+    } else {
+      ctx.quadraticCurveTo(tg.C2.x, tg.C2.y, tg.T.x, tg.T.y);
+      ctx.quadraticCurveTo(tg.C1.x, tg.C1.y, tg.A.x, tg.A.y);
+    }
+    ctx.closePath();
+  }
+
+  function hexToRgba(hex, a){
+    var h = hex.replace('#', '');
+    if (h.length === 3) h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+    var n = parseInt(h, 16);
+    return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
+  }
+
+  var ROT_PUNCT = /[，。、；：！？,.；:!?]/;
+
+  function draw(ctx, s, g, scale){
+    var W = g.W, H = g.H, box = g.box;
+    ctx.setTransform(scale, 0, 0, scale, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    ctx.font = fontOf(s);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    // 背景 + 边框：有尾巴时用整体轮廓一次成型（根边开放、无内部线）
+    if (g.tail){
+      if (!s.bgTransparent){
+        ctx.fillStyle = hexToRgba(s.bgColor, s.bgOpacity);
+        ctx.beginPath();
+        bubblePath(ctx, s, g);
+        ctx.fill();
+      }
+      if (g.bw > 0){
+        ctx.lineWidth = g.bw;
+        ctx.lineJoin = 'miter';
+        ctx.miterLimit = 8;
+        ctx.strokeStyle = hexToRgba(s.borderColor, 1);
+        ctx.beginPath();
+        bubblePath(ctx, s, g);
+        ctx.stroke();
+      }
+    } else {
+      if (!s.bgTransparent){
+        ctx.fillStyle = hexToRgba(s.bgColor, s.bgOpacity);
+        ctx.beginPath();
+        shapePath(ctx, s, g, 0);
+        ctx.fill();
+      }
+      if (g.bw > 0){
+        ctx.lineWidth = g.bw;
+        ctx.strokeStyle = hexToRgba(s.borderColor, 1);
+        ctx.beginPath();
+        shapePath(ctx, s, g, g.bw / 2);
+        ctx.stroke();
+      }
+    }
+
+    // 内容区起点：内容矩形始终居中于框（椭圆模式下即椭圆的内接矩形）
+    var ox = box.x + (box.w - g.cw) / 2;
+    var oy = box.y + (box.h - g.ch) / 2;
+
+    if (s.shadow){
+      ctx.shadowColor = hexToRgba(s.shadowColor, .55);
+      ctx.shadowBlur = s.shadowBlur;
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = Math.max(1, s.shadowBlur / 4);
+    } else {
+      ctx.shadowColor = 'transparent';
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
+    }
+    ctx.fillStyle = s.color;
+
+    var lo = g.lo;
+    if (s.direction === 'vertical'){
+      var mainLen = lo.mainLen;
+      var startX = s.alignH === 'left' ? ox :
+                   s.alignH === 'right' ? ox + g.cw - mainLen :
+                   ox + (g.cw - mainLen) / 2;
+      var cols = lo.blocks;
+      for (var i = 0; i < cols.length; i++){
+        var blk = cols[i];
+        var cx = s.colOrder === 'ltr'
+          ? startX + (i + 0.5) * lo.step
+          : startX + mainLen - (i + 0.5) * lo.step;
+        var startY = s.alignV === 'top' ? oy :
+                     s.alignV === 'bottom' ? oy + g.ch - blk.size :
+                     oy + (g.ch - blk.size) / 2;
+        var y = startY;
+        for (var j = 0; j < blk.chars.length; j++){
+          var it = blk.chars[j];
+          var cy = y + (it.adv - s.letterSpacing) / 2;
+          if (s.rotatePunct && ROT_PUNCT.test(it.ch)){
+            ctx.save();
+            ctx.translate(cx, cy);
+            ctx.rotate(Math.PI / 2);
+            ctx.fillText(it.ch, -s.fontSize * 0.18, -s.fontSize * 0.18); // 旋转后落在格子右上
+            ctx.restore();
+          } else {
+            ctx.fillText(it.ch, cx, cy);
+          }
+          y += it.adv;
+        }
+      }
+    } else {
+      var startY = s.alignV === 'top' ? oy :
+                   s.alignV === 'bottom' ? oy + g.ch - lo.mainLen :
+                   oy + (g.ch - lo.mainLen) / 2;
+      for (var k = 0; k < lo.blocks.length; k++){
+        var line = lo.blocks[k];
+        var lx = s.alignH === 'left' ? ox :
+                 s.alignH === 'right' ? ox + g.cw - line.size :
+                 ox + (g.cw - line.size) / 2;
+        var cyy = startY + lo.step / 2;
+        var x = lx;
+        for (var t = 0; t < line.chars.length; t++){
+          var c = line.chars[t];
+          ctx.fillText(c.ch, x + (c.adv - s.letterSpacing) / 2, cyy);
+          x += c.adv;
+        }
+        startY += line.chars.length === 0 ? lo.step * 0.6 : lo.step;
+      }
+    }
+
+    ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
+  }
+
+  // ---------- 预览 / 导出 ----------
+  function render(){
+    var s = state();
+    var g = computeGeometry(s);
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    cv.width = Math.round(g.W * dpr);
+    cv.height = Math.round(g.H * dpr);
+    cv.style.width = g.W + 'px'; // 高度交给 CSS height:auto，缩放时保持比例
+    draw(cv.getContext('2d'), s, g, dpr);
+    $('info').textContent = '画布 ' + g.W + ' × ' + g.H + ' px';
+  }
+
+  function exportCanvas(scale){
+    var s = state();
+    var g = computeGeometry(s);
+    var c = document.createElement('canvas');
+    c.width = Math.round(g.W * scale);
+    c.height = Math.round(g.H * scale);
+    draw(c.getContext('2d'), s, g, scale);
+    return c;
+  }
+
+  function msg(t){ $('msg').textContent = t; }
+
+  $('btnPng').addEventListener('click', function(){
+    var scale = parseFloat($('exportScale').value);
+    // 原生 App 壳内：经 JS 桥直接保存到系统相册
+    if (window.AndroidBridge && window.AndroidBridge.savePng){
+      var b64 = exportCanvas(scale).toDataURL('image/png').split(',')[1];
+      window.AndroidBridge.savePng(b64, 'textbox-' + Date.now() + '.png');
+      msg('已保存到系统相册 Pictures/TextBox');
+      return;
+    }
+    exportCanvas(scale).toBlob(function(blob){
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'textbox-' + Date.now() + '.png';
+      a.click();
+      setTimeout(function(){ URL.revokeObjectURL(a.href); }, 2000);
+      msg('已导出 PNG（' + scale + 'x，保留透明通道）');
+    }, 'image/png');
+  });
+
+  $('btnCopy').addEventListener('click', function(){
+    var scale = parseFloat($('exportScale').value);
+    exportCanvas(scale).toBlob(function(blob){
+      if (!navigator.clipboard || !window.ClipboardItem){
+        msg('当前浏览器不支持复制图片，请用“导出 PNG”');
+        return;
+      }
+      navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })])
+        .then(function(){ msg('图片已复制到剪贴板'); })
+        .catch(function(){ msg('复制失败，请用“导出 PNG”'); });
+    }, 'image/png');
+  });
+
+  $('fontFile').addEventListener('change', function(e){
+    var f = e.target.files && e.target.files[0];
+    if (!f) return;
+    var name = 'UserFont' + Date.now();
+    var face = new FontFace(name, 'url(' + URL.createObjectURL(f) + ')');
+    face.load().then(function(loaded){
+      document.fonts.add(loaded);
+      customFontName = name;
+      render();
+      msg('已加载字体：' + f.name);
+    }).catch(function(){ msg('字体加载失败'); });
+  });
+
+  // ---------- 绑定 ----------
+  var pairs = [['fontSize','fontSizeVal',0,'',1],['lineHeight','lineHeightVal',2,'',1],['letterSpacing','letterSpacingVal',0,'',1],
+               ['padding','paddingVal',0,'',1],['bgOpacity','bgOpacityVal',0,'',1],['borderWidth','borderWidthVal',0,'',1],
+               ['radius','radiusVal',0,'',1],['shadowBlur','shadowBlurVal',0,'',1],
+               ['tailAngle','tailAngleVal',0,'°',1],['tailLen','tailLenVal',0,'',1],
+               ['tailWidth','tailWidthVal',0,'',1],['tailCurl','tailCurlVal',2,'',0.01]];
+  pairs.forEach(function(p){
+    var el = $(p[0]);
+    var out = $(p[1]);
+    function sync(){
+      var v = parseFloat(el.value) * p[4];
+      out.textContent = (p[2] ? v.toFixed(p[2]) : Math.round(v)) + p[3];
+      var mn = parseFloat(el.min), mx = parseFloat(el.max);
+      var pct = mx > mn ? (parseFloat(el.value) - mn) / (mx - mn) * 100 : 0;
+      el.style.setProperty('--fill', pct.toFixed(2) + '%');
+    }
+    el.addEventListener('input', function(){ sync(); render(); });
+    sync();
+  });
+
+  $('fontFamily').addEventListener('change', function(){ customFontName = null; render(); });
+
+  ['text','colOrder','rotatePunct','fontFamily','fontWeight','color','shadow','shadowColor',
+   'alignH','alignV','bgTransparent','bgColor','borderColor','width','height'].forEach(function(id){
+    $(id).addEventListener('input', render);
+  });
+
+  ['tailOn','tailShape','shape'].forEach(function(id){
+    $(id).addEventListener('change', function(){ syncMode(); render(); });
+  });
+
+  document.querySelectorAll('input[name="direction"]').forEach(function(el){
+    el.addEventListener('change', function(){ syncMode(); render(); });
+  });
+
+  // ---------- 主题：默认跟随系统，手动切换后记住选择 ----------
+  var THEME_KEY = 'textbox-theme';
+  function setTheme(t){ document.documentElement.setAttribute('data-theme', t); }
+  function savedTheme(){ try { return localStorage.getItem(THEME_KEY); } catch (e) { return null; } }
+  (function initTheme(){
+    var mq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+    setTheme(savedTheme() || (mq && mq.matches ? 'dark' : 'light'));
+    if (mq && mq.addEventListener){
+      mq.addEventListener('change', function(e){      // 用户没手动选过时，跟随系统变化
+        if (!savedTheme()) setTheme(e.matches ? 'dark' : 'light');
+      });
+    }
+    $('btnTheme').addEventListener('click', function(){
+      var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      setTheme(next);
+      try { localStorage.setItem(THEME_KEY, next); } catch (e) {}
+    });
+  })();
+
+  $('autoSize').addEventListener('change', function(){ syncMode(); render(); });
+
+  function syncMode(){
+    var auto = $('autoSize').checked;
+    $('width').disabled = auto;
+    $('height').disabled = auto;
+    var vert = radio('direction') === 'vertical';
+    $('rowColOrder').style.display = vert ? '' : 'none';
+    $('rowPunct').style.display = vert ? '' : 'none';
+    $('rowRadius').style.display = ($('shape').value === 'ellipse') ? 'none' : '';
+    var tail = $('tailOn').checked;
+    $('tailDetails').style.display = tail ? '' : 'none';
+    $('rowCurl').style.display = (tail && $('tailShape').value === 'curve') ? '' : 'none';
+  }
+
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(render);
+  syncMode();
+  render();
+})();
+</script>
+</body>
+</html>
