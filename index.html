@@ -301,10 +301,11 @@
       <div class="row">
         <label>自定义</label>
         <input type="file" id="fontFile" accept=".ttf,.otf,.woff,.woff2" style="font-size:12px">
+        <button type="button" id="btnFontRemove" class="ghost" style="flex:none; padding:6px 10px">移除</button>
       </div>
       <div class="row" style="margin-top:2px">
         <label>&nbsp;</label>
-        <span style="font-size:12px; color:var(--ink-2)">手机上若没有所选字体，会自动回退到系统默认字体；上传字体文件则任何设备都可用</span>
+        <span style="font-size:12px; color:var(--ink-2)">上传的字体会自动保存到本机并加入上方列表，下次打开无需重新上传</span>
       </div>
       <div class="row">
         <label>字号</label>
@@ -509,6 +510,97 @@
   var customFontName = null;
   var wobbleSeed = (Math.random() * 4294967295) >>> 0;   // 不规则边框的随机种子
 
+  // ---------- 上传字体的持久化：存 IndexedDB，启动时自动恢复并加入字体下拉 ----------
+  var userFonts = {};                 // 字体名 -> FontFace
+  var FONT_DB = 'btg-font-db', FONT_STORE = 'fonts', FONT_CUR_KEY = 'btg-font-current';
+
+  function fontDB(){
+    return new Promise(function(res, rej){
+      if (!window.indexedDB){ rej(new Error('no indexedDB')); return; }
+      var req = indexedDB.open(FONT_DB, 1);
+      req.onupgradeneeded = function(){
+        if (!req.result.objectStoreNames.contains(FONT_STORE)) req.result.createObjectStore(FONT_STORE);
+      };
+      req.onsuccess = function(){ res(req.result); };
+      req.onerror = function(){ rej(req.error || new Error('open failed')); };
+    });
+  }
+  function fontSave(name, buf){
+    return fontDB().then(function(db){
+      return new Promise(function(res, rej){
+        var tx = db.transaction(FONT_STORE, 'readwrite');
+        tx.objectStore(FONT_STORE).put({ name: name, buf: buf, t: Date.now() }, name);
+        tx.oncomplete = function(){ res(true); };
+        tx.onerror = function(){ rej(tx.error || new Error('put failed')); };
+      });
+    });
+  }
+  function fontDel(name){
+    return fontDB().then(function(db){
+      return new Promise(function(res, rej){
+        var tx = db.transaction(FONT_STORE, 'readwrite');
+        tx.objectStore(FONT_STORE).delete(name);
+        tx.oncomplete = function(){ res(true); };
+        tx.onerror = function(){ rej(tx.error || new Error('del failed')); };
+      });
+    });
+  }
+  function fontAll(){
+    return fontDB().then(function(db){
+      return new Promise(function(res, rej){
+        var tx = db.transaction(FONT_STORE, 'readonly');
+        var req = tx.objectStore(FONT_STORE).getAll();
+        req.onsuccess = function(){ res(req.result || []); };
+        req.onerror = function(){ rej(req.error || new Error('get failed')); };
+      });
+    });
+  }
+  function fontVal(name){ return '"' + name + '"'; }
+  function fontAddOption(name){
+    var sel = $('fontFamily'), v = fontVal(name);
+    for (var i = 0; i < sel.options.length; i++) if (sel.options[i].value === v) return;
+    var o = document.createElement('option');
+    o.value = v; o.textContent = name + '（已上传）';
+    sel.appendChild(o);
+  }
+  function fontRemoveOption(name){
+    var sel = $('fontFamily'), v = fontVal(name);
+    for (var i = 0; i < sel.options.length; i++) if (sel.options[i].value === v){ sel.remove(i); return; }
+  }
+  function fontRegister(name, buf){
+    var face = new FontFace(name, buf);
+    return face.load().then(function(){
+      if (userFonts[name]){ try { document.fonts.delete(userFonts[name]); } catch (e) {} }
+      document.fonts.add(face);
+      userFonts[name] = face;
+      fontAddOption(name);
+      return name;
+    });
+  }
+  function selectFont(name){
+    var sel = $('fontFamily');
+    sel.value = fontVal(name);
+    customFontName = name;
+    try { localStorage.setItem(FONT_CUR_KEY, sel.value); } catch (e) {}
+  }
+  function fontRestore(){
+    return fontAll().then(function(list){
+      var jobs = (list || []).map(function(it){
+        return fontRegister(it.name, it.buf).then(function(){}, function(){});
+      });
+      return Promise.all(jobs).then(function(){ return (list || []).length; });
+    }).then(function(n){
+      var cur = null;
+      try { cur = localStorage.getItem(FONT_CUR_KEY); } catch (e) {}
+      if (cur){
+        $('fontFamily').value = cur;            // 字体已不存在时赋值无效，保持默认
+        var nm = cur.replace(/^"|"$/g, '');
+        customFontName = userFonts[nm] ? nm : null;
+      }
+      return n;
+    }).catch(function(){ return 0; });
+  }
+
   // ---------- 状态读取 ----------
   function num(id){ return parseFloat($(id).value); }
   function str(id){ return $(id).value; }
@@ -524,7 +616,7 @@
       direction: radio('direction'),
       colOrder: str('colOrder'),
       rotatePunct: chk('rotatePunct'),
-      fontFamily: customFontName ? ('"' + customFontName + '"') : str('fontFamily'),
+      fontFamily: str('fontFamily'),   // 上传的字体也会作为选项出现在下拉里
       fontSize: num('fontSize'),
       fontWeight: str('fontWeight'),
       color: str('color'),
@@ -1234,14 +1326,38 @@
   $('fontFile').addEventListener('change', function(e){
     var f = e.target.files && e.target.files[0];
     if (!f) return;
-    var name = 'UserFont' + Date.now();
-    var face = new FontFace(name, 'url(' + URL.createObjectURL(f) + ')');
-    face.load().then(function(loaded){
-      document.fonts.add(loaded);
-      customFontName = name;
-      render();
-      msg('已加载字体：' + f.name);
-    }).catch(function(){ msg('字体加载失败'); });
+    var name = (f.name || 'UserFont').replace(/\.(ttf|otf|woff2?)$/i, '') || 'UserFont';
+    var fr = new FileReader();
+    fr.onload = function(){
+      var buf = fr.result;
+      fontSave(name, buf.slice(0)).then(function(){}, function(){
+        // 保存失败不影响本次使用，只是下次需要重新上传
+        setTimeout(function(){ msg('字体已加载，但保存失败（可能超出本机容量）'); }, 0);
+      });
+      fontRegister(name, buf.slice(0)).then(function(){
+        selectFont(name);
+        render();
+        msg('已加载并保存字体：' + name);
+      }).catch(function(){ msg('字体加载失败'); });
+    };
+    fr.onerror = function(){ msg('字体读取失败'); };
+    fr.readAsArrayBuffer(f);
+    e.target.value = '';                     // 允许再次选择同一个文件
+  });
+
+  $('btnFontRemove').addEventListener('click', function(){
+    var name = ($('fontFamily').value || '').replace(/^"|"$/g, '');
+    if (!userFonts[name]){ msg('请先在上方选择要移除的上传字体'); return; }
+    if (!window.confirm('移除字体「' + name + '」？')) return;
+    fontDel(name).then(function(){}, function(){});
+    try { document.fonts.delete(userFonts[name]); } catch (err) {}
+    delete userFonts[name];
+    fontRemoveOption(name);
+    $('fontFamily').selectedIndex = 0;
+    customFontName = null;
+    try { localStorage.setItem(FONT_CUR_KEY, $('fontFamily').value); } catch (err) {}
+    render();
+    msg('已移除字体：' + name);
   });
 
   // ---------- 绑定 ----------
@@ -1267,7 +1383,12 @@
     sync();
   });
 
-  $('fontFamily').addEventListener('change', function(){ customFontName = null; render(); });
+  $('fontFamily').addEventListener('change', function(){
+    var nm = this.value.replace(/^"|"$/g, '');
+    customFontName = userFonts[nm] ? nm : null;
+    try { localStorage.setItem(FONT_CUR_KEY, this.value); } catch (e) {}
+    render();
+  });
 
   ['text','colOrder','rotatePunct','fontFamily','fontWeight','color','shadow','shadowColor',
    'alignH','alignV','bgTransparent','bgColor','borderColor','width','height'].forEach(function(id){
@@ -1387,6 +1508,8 @@
       for (var i = 0; i < rs.length; i++) rs[i].checked = (rs[i].value === vals.__direction);
     }
     if (typeof vals.__seed === 'number') wobbleSeed = vals.__seed >>> 0;
+    var nm = ($('fontFamily').value || '').replace(/^"|"$/g, '');
+    customFontName = userFonts[nm] ? nm : null;
     Object.keys(syncFns).forEach(function(k){ syncFns[k](); });  // 刷新滑块数值显示
     syncMode();                                                  // 刷新行显隐 / 尖刺上限
     render();
@@ -1414,7 +1537,8 @@
     var list = tplLoad(), i = parseInt($('tplList').value, 10);
     if (isNaN(i) || !list[i]){ msg('请先选择一个模板'); return; }
     tplApply(list[i].values);
-    if (list[i].values.__font && !customFontName) msg('已应用：' + list[i].name + '（该模板用的是上传字体，需重新上传）');
+    var tf = list[i].values.__font;
+    if (tf && !userFonts[tf]) msg('已应用：' + list[i].name + '（该模板用的上传字体「' + tf + '」不在本机，需重新上传）');
     else msg('已应用模板：' + list[i].name);
   });
 
@@ -1432,6 +1556,12 @@
   syncMode();
   tplRefresh();
   render();
+
+  // 恢复上次上传的字体（并自动选中上次使用的字体）
+  fontRestore().then(function(n){
+    if (n) msg('已恢复 ' + n + ' 个上传字体');
+    render();
+  });
 })();
 </script>
 </body>
