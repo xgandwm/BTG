@@ -963,23 +963,26 @@
                      : Math.max(1, Math.round(ch + pad * 2 + bw * 2));
       var probe = tailGeom({ x: 0, y: 0, w: boxW, h: boxH }, s);
       var out = probe ? probe.outer : { l: 0, t: 0, r: 0, b: 0 };
-      W = Math.max(1, Math.round(boxW + out.l + out.r));
-      H = Math.max(1, Math.round(boxH + out.t + out.b));
-      box = { x: out.l, y: out.t, w: boxW, h: boxH };
+      // 四周留 bw/2 给描边外沿：有尾巴时描边沿轮廓中心线，会向外扩线宽的一半
+      W = Math.max(1, Math.round(boxW + out.l + out.r + bw));
+      H = Math.max(1, Math.round(boxH + out.t + out.b + bw));
+      box = { x: out.l + bw / 2, y: out.t + bw / 2, w: boxW, h: boxH };
       tg = tailGeom(box, s);
     } else {
       W = Math.max(1, Math.round(s.width));
       H = Math.max(1, Math.round(s.height));
       var o = { l: 0, t: 0, r: 0, b: 0 };
       for (var it = 0; it < 3; it++){   // 尾巴外扩与框位置互相依赖，迭代收敛
-        var aw = Math.max(1, (W - o.l - o.r) / mr), ah = Math.max(1, (H - o.t - o.b) / mr);
-        box = { x: o.l + (W - o.l - o.r - aw) / 2, y: o.t + (H - o.t - o.b - ah) / 2, w: aw, h: ah };
+        var aw = Math.max(1, (W - o.l - o.r - bw) / mr), ah = Math.max(1, (H - o.t - o.b - bw) / mr);
+        box = { x: o.l + bw / 2 + (W - o.l - o.r - bw - aw) / 2,
+                y: o.t + bw / 2 + (H - o.t - o.b - bw - ah) / 2, w: aw, h: ah };
         tg = tailGeom(box, s);
         if (!tg) break;
         o = tg.outer;
       }
-      var aw2 = Math.max(1, (W - o.l - o.r) / mr), ah2 = Math.max(1, (H - o.t - o.b) / mr);
-      box = { x: o.l + (W - o.l - o.r - aw2) / 2, y: o.t + (H - o.t - o.b - ah2) / 2, w: aw2, h: ah2 };
+      var aw2 = Math.max(1, (W - o.l - o.r - bw) / mr), ah2 = Math.max(1, (H - o.t - o.b - bw) / mr);
+      box = { x: o.l + bw / 2 + (W - o.l - o.r - bw - aw2) / 2,
+              y: o.t + bw / 2 + (H - o.t - o.b - bw - ah2) / 2, w: aw2, h: ah2 };
       tg = tailGeom(box, s);
       cw = ell ? Math.max(0, box.w / K - bw * 2 - pad * 2)
                : Math.max(0, box.w - bw * 2 - pad * 2);
