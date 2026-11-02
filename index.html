@@ -236,6 +236,21 @@
     </div>
 
     <div class="group">
+      <div class="gt">模板</div>
+      <div class="row">
+        <label>名称</label>
+        <input type="text" id="tplName" placeholder="例如：漫画气泡 A" style="flex:1">
+        <button type="button" id="btnTplSave" style="flex:none; padding:8px 14px">保存</button>
+      </div>
+      <div class="row">
+        <label>已存</label>
+        <select id="tplList" style="flex:1"></select>
+        <button type="button" id="btnTplApply" class="ghost" style="flex:none; padding:8px 12px">应用</button>
+        <button type="button" id="btnTplDel" class="ghost" style="flex:none; padding:8px 12px">删除</button>
+      </div>
+    </div>
+
+    <div class="group">
       <div class="gt">文本</div>
       <textarea id="text" placeholder="输入文字，回车可手动换行">春风又绿江南岸
 明月何时照我还</textarea>
@@ -378,7 +393,28 @@
         <select id="shape">
           <option value="rect" selected>圆角矩形</option>
           <option value="ellipse">椭圆（圆框）</option>
+          <option value="wobbly">不规则（漫画手绘）</option>
+          <option value="burst">内心独白（光球尖刺）</option>
         </select>
+      </div>
+      <div class="row" id="rowWobble" style="display:none">
+        <label>波动</label>
+        <input type="range" id="wobbleAmp" min="2" max="40" step="1" value="14">
+        <span class="val" id="wobbleAmpVal">14%</span>
+      </div>
+      <div class="row" id="rowSpikes" style="display:none">
+        <label>尖角</label>
+        <select id="spikeDir" style="flex:1">
+          <option value="in" selected>向内凹陷</option>
+          <option value="out">向外凸出</option>
+        </select>
+        <input type="range" id="spikes" min="0" max="8" step="1" value="4">
+        <span class="val" id="spikesVal">4</span>
+      </div>
+      <div class="row" id="rowSeed" style="display:none">
+        <label>样式</label>
+        <button type="button" id="btnRandomWobble" class="ghost">随机一下</button>
+        <span class="val" id="seedVal">#0</span>
       </div>
       <div class="row" id="rowRadius">
         <label>圆角</label>
@@ -461,6 +497,7 @@
   var $ = function(id){ return document.getElementById(id); };
   var cv = $('cv');
   var customFontName = null;
+  var wobbleSeed = (Math.random() * 4294967295) >>> 0;   // 不规则边框的随机种子
 
   // ---------- 状态读取 ----------
   function num(id){ return parseFloat($(id).value); }
@@ -498,6 +535,10 @@
       borderWidth: num('borderWidth'),
       borderColor: str('borderColor'),
       shape: str('shape'),
+      spikeDir: str('spikeDir'),
+      wobbleAmp: num('wobbleAmp'),
+      spikes: num('spikes'),
+      wobbleSeed: wobbleSeed,
       radius: num('radius'),
       tailOn: chk('tailOn'),
       tailAngle: num('tailAngle'),
@@ -720,7 +761,141 @@
   }
 
   function boundaryOf(box, s){
-    return s.shape === 'ellipse' ? ellipseBoundary(box) : rrBoundary(box, s.radius);
+    if (s.shape === 'ellipse') return ellipseBoundary(box);
+    if (s.shape === 'wobbly') return polyBoundary(box, wobblyField(box, s));
+    if (s.shape === 'burst') return polyBoundary(box, burstField(box, s));
+    return rrBoundary(box, s.radius);
+  }
+
+  // ---- 不规则（漫画手绘）边界 ----
+  function mulberry32(seed){
+    var t = seed >>> 0;
+    return function(){
+      t += 0x6D2B79F5;
+      var r = Math.imul(t ^ (t >>> 15), 1 | t);
+      r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+      return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  // 确定性随机场：基础椭圆 ×（平滑谐波噪声 + 若干高斯尖峰/凹口），同一种子结果完全一致
+  // 尖峰方向由 s.spikeDir 决定：'in' 向内凹陷（默认），'out' 向外凸出
+  function wobblyField(box, s){
+    var a = Math.max(0.5, box.w / 2), b = Math.max(0.5, box.h / 2);
+    var rnd = mulberry32(s.wobbleSeed);
+    var H = 6, harm = [], i;
+    for (i = 0; i < H; i++) harm.push({ k: 2 + Math.floor(rnd() * 9), ph: rnd() * Math.PI * 2, amp: rnd() });
+    var spikes = [], n = Math.round(s.spikes);
+    var dir = s.spikeDir === 'out' ? 1 : -1;
+    for (i = 0; i < n; i++) spikes.push({ th: rnd() * Math.PI * 2, w: 0.10 + rnd() * 0.16, h: (0.55 + rnd() * 0.9) * dir });
+    var amp = s.wobbleAmp / 100;
+
+    function ratio(th){                       // 相对基础椭圆的缩放比例，与框尺寸无关
+      var f = 1, nz = 0;
+      for (var j = 0; j < H; j++) nz += harm[j].amp * Math.sin(harm[j].k * th + harm[j].ph);
+      f += amp * 1.6 * (nz / H);
+      for (j = 0; j < spikes.length; j++){
+        var sp = spikes[j];
+        var d = Math.abs((th - sp.th) % (2 * Math.PI));
+        if (d > Math.PI) d = 2 * Math.PI - d;
+        if (d < sp.w * 4) f += amp * sp.h * Math.exp(-(d * d) / (2 * sp.w * sp.w));
+      }
+      return Math.max(0.35, f);               // 凹陷最深不超过基础半径的 65%
+    }
+    // 先求最大外扩比例，再把基础椭圆按它缩小：轮廓峰值恰好贴住框边界，不会被画布裁掉
+    var MR = 1;
+    for (i = 0; i < 720; i++) MR = Math.max(MR, ratio(i * 2 * Math.PI / 720));
+    function radius(th){
+      var base = 1 / Math.sqrt(Math.pow(Math.cos(th) / a, 2) + Math.pow(Math.sin(th) / b, 2));
+      return Math.max(1, base / MR * ratio(th));
+    }
+    return { cx: box.x + box.w / 2, cy: box.y + box.h / 2, radius: radius, ratio: ratio, N: 720, ratioMax: MR };
+  }
+
+  // ---- 内心独白（光球尖刺）----
+  // 基础椭圆 + 均匀分布的细三角尖刺；每根刺长度带轻微随机（同种子可复现）
+  function burstField(box, s){
+    var a = Math.max(0.5, box.w / 2), b = Math.max(0.5, box.h / 2);
+    var rnd = mulberry32(s.wobbleSeed);
+    var NS = Math.max(8, Math.round(s.spikes));
+    var amp = s.wobbleAmp / 100;
+    var NB = Math.max(3, Math.round(NS / 4.5));   // 大突起数：大约每 4~5 根细刺一个大波
+    var ph = rnd() * Math.PI * 2;                 // 大波相位（随种子变化）
+    var lens = [];
+    for (var i = 0; i < NS; i++) lens.push(0.85 + rnd() * 0.3);   // 细刺长度轻微参差
+
+    function shape(th){
+      var u = th * NS / (2 * Math.PI);
+      var k = Math.floor(u), f = u - k;
+      var tri = f < 0.5 ? f * 2 : (1 - f) * 2;    // 连续锯齿：相邻刺在谷点直接相接，无平台
+      var big = 0.5 - 0.5 * Math.cos(NB * th + ph);  // 低频大突起 0..1
+      var kk = ((k % NS) + NS) % NS;
+      return (1 + amp * 0.9 * big) * (1 + amp * lens[kk] * tri);
+    }
+    var N = NS * 16;                              // 每齿 16 个采样点，刺尖精确落在采样点上
+    var MR = 1;
+    for (i = 0; i < N; i++) MR = Math.max(MR, shape(i * 2 * Math.PI / N));
+
+    function radius(th){
+      var base = 1 / Math.sqrt(Math.pow(Math.cos(th) / a, 2) + Math.pow(Math.sin(th) / b, 2));
+      // 基础椭圆按 MR 收缩，最高尖刺的尖端恰好到达框边界
+      return Math.max(1, base / MR * shape(th));
+    }
+    return { cx: box.x + box.w / 2, cy: box.y + box.h / 2, radius: radius, N: N, ratioMax: MR };
+  }
+
+  // 轮廓峰值相对基础椭圆的外扩比例（1 = 无凸出）
+  function wobbleMaxRatio(s){
+    if (s.shape === 'rect' || s.shape === 'ellipse') return 1;
+    var box = { x: 0, y: 0, w: 2, h: 2 };
+    var f = s.shape === 'burst' ? burstField(box, s) : wobblyField(box, s);
+    return f.ratioMax || 1;                 // 两种随机场都在构造时算好峰值
+  }
+
+  // 极坐标半径 → 顺时针折线点列；inset 为描边内缩量（沿径向收缩）
+  function polarPts(f, N, inset){
+    var pts = new Array(N + 1);
+    for (var i = 0; i <= N; i++){
+      var th = i * 2 * Math.PI / N;
+      var r = Math.max(1, f.radius(th) - inset);
+      pts[i] = { x: f.cx + r * Math.cos(th), y: f.cy + r * Math.sin(th) };
+    }
+    return pts;
+  }
+
+  // 折线边界（与 ellipseBoundary 相同的弧长参数化接口），供尾巴几何复用
+  function polyBoundary(box, field){
+    var f = field;
+    var N = f.N || 720;
+    var pts = polarPts(f, N, 0);
+    var cum = new Array(N + 1); cum[0] = 0;
+    for (var i = 1; i <= N; i++) cum[i] = cum[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+    var L = cum[N];
+
+    function pointAt(t){
+      t = ((t % L) + L) % L;
+      var lo = 0, hi = N;
+      while (lo < hi){
+        var mid = (lo + hi + 1) >> 1;
+        if (cum[mid] <= t) lo = mid; else hi = mid - 1;
+      }
+      if (lo >= N) return { x: pts[N].x, y: pts[N].y };
+      var seg = cum[lo + 1] - cum[lo];
+      var fr = seg > 1e-12 ? (t - cum[lo]) / seg : 0;
+      return { x: pts[lo].x + (pts[lo + 1].x - pts[lo].x) * fr, y: pts[lo].y + (pts[lo + 1].y - pts[lo].y) * fr };
+    }
+
+    function intersect(dx, dy){
+      var th = Math.atan2(dy, dx);
+      if (th < 0) th += 2 * Math.PI;
+      var t = f.radius(th);
+      var fi = th / (2 * Math.PI) * N;
+      var i0 = Math.floor(fi) % N, i1 = (i0 + 1) % N, fr = fi - Math.floor(fi);
+      var c0 = cum[i0], c1 = i1 === 0 ? L : cum[i1];
+      return { x: f.cx + dx * t, y: f.cy + dy * t, s: ((c0 + (c1 - c0) * fr) % L + L) % L };
+    }
+
+    return { r: 0, L: L, pointAt: pointAt, intersect: intersect };
   }
 
   // 基点与根部两点都取真实边界上的点（按弧长偏移），保证尾巴与框贴合
@@ -762,14 +937,16 @@
     var pad = s.padding;
     var lo, cw, ch, W, H, box, tg;
 
-    var ell = s.shape === 'ellipse';
-    var K = Math.SQRT2;                 // 椭圆的最大内接矩形缩放系数
+    // 椭圆/不规则/光球模式下，文字块（含内边距与边框）按 K 内接于基础椭圆
+    var ell = s.shape !== 'rect';
+    var mr = ell ? wobbleMaxRatio(s) : 1;   // 轮廓峰值外扩比例（含在 K 中）
+    var K = Math.SQRT2 * mr;
 
     if (s.autoSize){
       lo = layout(m, s, Infinity, Infinity);
       var cs = contentSize(lo, s);
       cw = cs.w; ch = cs.h;
-      // 椭圆模式下文字块（含内边距与边框）内接于椭圆
+      // 文字内接于缩小后的基础椭圆，轮廓峰值恰好贴住框边界，不会被画布裁掉
       var boxW = ell ? Math.max(1, Math.round(K * (cw + pad * 2 + bw * 2)))
                      : Math.max(1, Math.round(cw + pad * 2 + bw * 2));
       var boxH = ell ? Math.max(1, Math.round(K * (ch + pad * 2 + bw * 2)))
@@ -785,12 +962,14 @@
       H = Math.max(1, Math.round(s.height));
       var o = { l: 0, t: 0, r: 0, b: 0 };
       for (var it = 0; it < 3; it++){   // 尾巴外扩与框位置互相依赖，迭代收敛
-        box = { x: o.l, y: o.t, w: Math.max(1, W - o.l - o.r), h: Math.max(1, H - o.t - o.b) };
+        var aw = Math.max(1, (W - o.l - o.r) / mr), ah = Math.max(1, (H - o.t - o.b) / mr);
+        box = { x: o.l + (W - o.l - o.r - aw) / 2, y: o.t + (H - o.t - o.b - ah) / 2, w: aw, h: ah };
         tg = tailGeom(box, s);
         if (!tg) break;
         o = tg.outer;
       }
-      box = { x: o.l, y: o.t, w: Math.max(1, W - o.l - o.r), h: Math.max(1, H - o.t - o.b) };
+      var aw2 = Math.max(1, (W - o.l - o.r) / mr), ah2 = Math.max(1, (H - o.t - o.b) / mr);
+      box = { x: o.l + (W - o.l - o.r - aw2) / 2, y: o.t + (H - o.t - o.b - ah2) / 2, w: aw2, h: ah2 };
       tg = tailGeom(box, s);
       cw = ell ? Math.max(0, box.w / K - bw * 2 - pad * 2)
                : Math.max(0, box.w - bw * 2 - pad * 2);
@@ -820,6 +999,12 @@
       ctx.ellipse(box.x + box.w / 2, box.y + box.h / 2,
                   Math.max(0.5, box.w / 2 - inset), Math.max(0.5, box.h / 2 - inset),
                   0, 0, Math.PI * 2);
+    } else if (s.shape === 'wobbly' || s.shape === 'burst'){
+      var f = s.shape === 'burst' ? burstField(box, s) : wobblyField(box, s);
+      var pts = polarPts(f, f.N || 720, inset);
+      ctx.moveTo(pts[0].x, pts[0].y);
+      for (var i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+      ctx.closePath();
     } else {
       rrPath(ctx, box.x + inset, box.y + inset,
              Math.max(1, box.w - inset * 2), Math.max(1, box.h - inset * 2),
@@ -860,7 +1045,8 @@
     return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')';
   }
 
-  var ROT_PUNCT = /[，。、；：！？,.；:!?]/;
+  // 竖排时需旋转的标点：句读点、括号、引号、破折号/省略号/间隔号，以及常见半角标点
+  var ROT_PUNCT = /[，。、；：！？；：．·…～—－_,.;:!?~()\[\]{}<>「」『』【】〔〕（）〈〉《》]/;
 
   function draw(ctx, s, g, scale){
     var W = g.W, H = g.H, box = g.box;
@@ -939,10 +1125,12 @@
           var it = blk.chars[j];
           var cy = y + (it.adv - s.letterSpacing) / 2;
           if (s.rotatePunct && ROT_PUNCT.test(it.ch)){
+            // 顺时针旋转 90°，并把字形移到所在字格的右上象限（竖排标点位置），且保证不越出列宽
+            var off = Math.min(s.fontSize * 0.24, Math.max(0, (lo.step - s.fontSize) * 0.5));
             ctx.save();
-            ctx.translate(cx, cy);
+            ctx.translate(cx + off, cy - off);
             ctx.rotate(Math.PI / 2);
-            ctx.fillText(it.ch, -s.fontSize * 0.18, -s.fontSize * 0.18); // 旋转后落在格子右上
+            ctx.fillText(it.ch, 0, 0);
             ctx.restore();
           } else {
             ctx.fillText(it.ch, cx, cy);
@@ -1048,7 +1236,9 @@
                ['padding','paddingVal',0,'',1],['bgOpacity','bgOpacityVal',0,'',1],['borderWidth','borderWidthVal',0,'',1],
                ['radius','radiusVal',0,'',1],['shadowBlur','shadowBlurVal',0,'',1],
                ['tailAngle','tailAngleVal',0,'°',1],['tailLen','tailLenVal',0,'',1],
-               ['tailWidth','tailWidthVal',0,'',1],['tailCurl','tailCurlVal',2,'',0.01]];
+               ['tailWidth','tailWidthVal',0,'',1],['tailCurl','tailCurlVal',2,'',0.01],
+               ['wobbleAmp','wobbleAmpVal',0,'%',1],['spikes','spikesVal',0,'',1]];
+  var syncFns = {};
   pairs.forEach(function(p){
     var el = $(p[0]);
     var out = $(p[1]);
@@ -1059,6 +1249,7 @@
       var pct = mx > mn ? (parseFloat(el.value) - mn) / (mx - mn) * 100 : 0;
       el.style.setProperty('--fill', pct.toFixed(2) + '%');
     }
+    syncFns[p[0]] = sync;
     el.addEventListener('input', function(){ sync(); render(); });
     sync();
   });
@@ -1070,8 +1261,14 @@
     $(id).addEventListener('input', render);
   });
 
-  ['tailOn','tailShape','shape'].forEach(function(id){
+  ['tailOn','tailShape','shape','spikeDir'].forEach(function(id){
     $(id).addEventListener('change', function(){ syncMode(); render(); });
+  });
+
+  $('btnRandomWobble').addEventListener('click', function(){
+    wobbleSeed = (Math.random() * 4294967295) >>> 0;
+    syncMode();
+    render();
   });
 
   document.querySelectorAll('input[name="direction"]').forEach(function(el){
@@ -1106,14 +1303,121 @@
     var vert = radio('direction') === 'vertical';
     $('rowColOrder').style.display = vert ? '' : 'none';
     $('rowPunct').style.display = vert ? '' : 'none';
-    $('rowRadius').style.display = ($('shape').value === 'ellipse') ? 'none' : '';
+    var shapeV = $('shape').value;
+    var wob = shapeV === 'wobbly', burst = shapeV === 'burst';
+    $('rowRadius').style.display = (shapeV === 'rect') ? '' : 'none';
+    $('rowWobble').style.display = (wob || burst) ? '' : 'none';
+    $('rowWobble').querySelector('label').textContent = burst ? '尖刺长' : '波动';
+    $('rowSpikes').style.display = (wob || burst) ? '' : 'none';
+    $('rowSpikes').querySelector('label').textContent = burst ? '尖刺数' : '尖角';
+    var sp = $('spikes');
+    sp.max = burst ? 256 : 8;
+    if (burst && parseFloat(sp.value) <= 8) sp.value = 48;      // 从手绘切来给默认密度
+    if (!burst && parseFloat(sp.value) > 8) sp.value = 4;
+    if (syncFns.spikes) syncFns.spikes();
+    if (syncFns.wobbleAmp) syncFns.wobbleAmp();
+    $('rowSeed').style.display = (wob || burst) ? '' : 'none';
+    $('seedVal').textContent = '#' + wobbleSeed.toString(36);
     var tail = $('tailOn').checked;
     $('tailDetails').style.display = tail ? '' : 'none';
     $('rowCurl').style.display = (tail && $('tailShape').value === 'curve') ? '' : 'none';
   }
 
+  // ---------- 模板：把当前全部参数存起来，随时一键套用 ----------
+  // 自动收集所有带 id 的设置控件（排除文字内容与字体文件），新增控件无需改这里
+  var TPL_KEY = 'btg-templates';
+  function tplIds(){
+    return Array.prototype.slice.call(document.querySelectorAll('input[id],select[id],textarea[id]'))
+      .filter(function(el){
+        return el.id !== 'text' && el.id !== 'tplName' && el.type !== 'file';
+      })
+      .map(function(el){ return el.id; });
+  }
+  function tplValues(){
+    var o = {};
+    tplIds().forEach(function(id){
+      var el = $(id);
+      o[id] = (el.type === 'checkbox' || el.type === 'radio') ? !!el.checked : el.value;
+    });
+    o.__direction = radio('direction');   // 排列方向（无 id，单独记）
+    o.__seed = wobbleSeed;                // 不规则 / 光球尖刺的随机样式
+    o.__font = customFontName || '';      // 上传的自定字体名（仅记录，用于提示）
+    return o;
+  }
+  function tplLoad(){
+    try { return JSON.parse(localStorage.getItem(TPL_KEY) || '[]'); } catch (e) { return []; }
+  }
+  function tplStore(list){
+    try { localStorage.setItem(TPL_KEY, JSON.stringify(list)); } catch (e) {}
+  }
+  function tplRefresh(){
+    var list = tplLoad(), sel = $('tplList');
+    sel.innerHTML = '';
+    var none = document.createElement('option');
+    none.value = ''; none.textContent = list.length ? '（选择模板）' : '（暂无模板）';
+    sel.appendChild(none);
+    list.forEach(function(t, i){
+      var o = document.createElement('option');
+      o.value = String(i); o.textContent = t.name;
+      sel.appendChild(o);
+    });
+  }
+  function tplApply(vals){
+    tplIds().forEach(function(id){
+      if (!(id in vals)) return;
+      var el = $(id);
+      if (el.type === 'checkbox') el.checked = !!vals[id];
+      else el.value = vals[id];
+    });
+    if (vals.__direction){
+      var rs = document.getElementsByName('direction');
+      for (var i = 0; i < rs.length; i++) rs[i].checked = (rs[i].value === vals.__direction);
+    }
+    if (typeof vals.__seed === 'number') wobbleSeed = vals.__seed >>> 0;
+    Object.keys(syncFns).forEach(function(k){ syncFns[k](); });  // 刷新滑块数值显示
+    syncMode();                                                  // 刷新行显隐 / 尖刺上限
+    render();
+  }
+
+  $('tplList').addEventListener('change', function(){
+    var list = tplLoad(), i = parseInt(this.value, 10);
+    if (!isNaN(i) && list[i]) $('tplName').value = list[i].name;
+  });
+
+  $('btnTplSave').addEventListener('click', function(){
+    var name = ($('tplName').value || '').trim() || ('模板 ' + (tplLoad().length + 1));
+    var list = tplLoad();
+    var idx = -1;
+    for (var i = 0; i < list.length; i++) if (list[i].name === name) idx = i;
+    var item = { name: name, values: tplValues() };
+    if (idx >= 0) list[idx] = item; else { list.push(item); idx = list.length - 1; }
+    tplStore(list);
+    tplRefresh();
+    $('tplList').value = String(idx);
+    msg('已保存模板：' + name);
+  });
+
+  $('btnTplApply').addEventListener('click', function(){
+    var list = tplLoad(), i = parseInt($('tplList').value, 10);
+    if (isNaN(i) || !list[i]){ msg('请先选择一个模板'); return; }
+    tplApply(list[i].values);
+    if (list[i].values.__font && !customFontName) msg('已应用：' + list[i].name + '（该模板用的是上传字体，需重新上传）');
+    else msg('已应用模板：' + list[i].name);
+  });
+
+  $('btnTplDel').addEventListener('click', function(){
+    var list = tplLoad(), i = parseInt($('tplList').value, 10);
+    if (isNaN(i) || !list[i]){ msg('请先选择一个模板'); return; }
+    if (!window.confirm('删除模板「' + list[i].name + '」？')) return;
+    list.splice(i, 1);
+    tplStore(list);
+    tplRefresh();
+    msg('已删除模板');
+  });
+
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(render);
   syncMode();
+  tplRefresh();
   render();
 })();
 </script>
