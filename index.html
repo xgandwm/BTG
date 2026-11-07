@@ -121,6 +121,7 @@
   }
   .row{display:flex; align-items:center; gap:10px; margin:9px 0}
   .row>label{flex:none; width:72px; color:var(--ink-2); font-size:13px}
+  .row input[type="text"], .row select, .row textarea{min-width:0}   /* 允许收缩，防止把行尾按钮挤出卡片 */
   .row .val{
     flex:none; min-width:48px; text-align:center; font-size:12px; color:var(--ink);
     background:var(--card); border:1px solid var(--line); border-radius:7px;
@@ -221,6 +222,7 @@
     <div class="preview-head">
       <span class="chip">实时预览</span>
       <span class="info" id="info"></span>
+      <button type="button" class="ghost" id="btnSelBox" style="margin-left:auto; padding:4px 10px; font-size:12px">隐藏辅助框</button>
     </div>
     <div class="stage"><div class="board"><canvas id="cv"></canvas></div></div>
   </section>
@@ -394,6 +396,28 @@
         <label>不透明度</label>
         <input type="range" id="bgOpacity" min="0" max="100" step="1" value="100">
         <span class="val" id="bgOpacityVal">100</span>
+      </div>
+      <div class="row">
+        <label>&nbsp;</label>
+        <label class="chk"><input type="checkbox" id="multiOn"> 连框模式（多气泡相连，重叠处无边框）</label>
+      </div>
+      <div id="multiDetails" style="display:none">
+        <div class="row">
+          <label>框</label>
+          <select id="frameSel" style="flex:1"></select>
+          <button type="button" id="btnFrameAdd" class="ghost" style="flex:none; padding:6px 10px">＋</button>
+          <button type="button" id="btnFrameDel" class="ghost" style="flex:none; padding:6px 10px">－</button>
+        </div>
+        <div class="row">
+          <label>位置</label>
+          <input type="number" id="frameX" value="0" style="width:72px">
+          <input type="number" id="frameY" value="0" style="width:72px">
+          <span style="font-size:12px; color:var(--ink-2)">也可在预览中点选 / 拖动</span>
+        </div>
+        <div class="row" style="margin-top:2px">
+          <label>&nbsp;</label>
+          <span style="font-size:12px; color:var(--ink-2)">左侧所有参数（形状、文字、尾巴、样式）都只属于当前选中的框</span>
+        </div>
       </div>
     </div>
 
@@ -973,10 +997,12 @@
     for (i = 0; i < NC; i++){
       var th = i * 2 * Math.PI / NC + (rnd() - 0.5) * (2 * Math.PI / NC) * 0.25;
       var R0 = ellipseR(th);
-      var R = R0 * (1 - amp * 0.5);                          // 瓣心：略向内
-      var half = R * Math.sin(Math.PI / NC);                 // 相邻瓣心间距的一半
+      var half = R0 * Math.sin(Math.PI / NC);                // 相邻瓣心间距的一半
       // 瓣半径至少能覆盖到邻瓣（保证交叠出凹角），再叠加随机大小
       var rc = Math.max(amp * R0, half * 1.25) * (0.88 + rnd() * 0.26);
+      // 瓣心内缩至少 rc/2：瓣的外露弧不超过半圆，凸起平缓不突出
+      var R = Math.min(R0 * (1 - amp * 0.5), R0 - rc / 2);
+      R = Math.max(R, R0 * 0.45);
       lobes.push({ th: th, R: R, rc: rc });
     }
 
@@ -1003,7 +1029,7 @@
     function radius(th){
       return Math.max(1, raw(th) / MR);
     }
-    return { cx: box.x + box.w / 2, cy: box.y + box.h / 2, radius: radius, N: N, ratioMax: MR };
+    return { cx: box.x + box.w / 2, cy: box.y + box.h / 2, radius: radius, N: N, ratioMax: MR, lobes: lobes };
   }
 
   // ---- 书页（不规则纸片）----
@@ -1012,8 +1038,8 @@
   function pageMargin(s, w, h){
     return Math.max(4, Math.ceil(Math.min(w, h) * (s.wobbleAmp / 100) * 1.25));
   }
-  function ptsInset(pts, inset){                 // 点列沿内法向收缩（顺时针轮廓，左法向即内法向）
-    if (!(inset > 0)) return pts;
+  function ptsInset(pts, inset){                 // 点列沿内法向收缩（顺时针轮廓，左法向即内法向）；负值外扩
+    if (!inset) return pts;
     var n = pts.length - 1, out = [];
     for (var i = 0; i < n; i++){
       var p0 = pts[(i - 1 + n) % n], p1 = pts[i], p2 = pts[(i + 1) % n];
@@ -1250,7 +1276,9 @@
     };
   }
 
-  function computeGeometry(s){
+  // extra：四周额外外扩（连框模式给外移描边留出线宽），W/H 随之加大、box 平移
+  function computeGeometry(s, extra){
+    extra = extra || 0;
     var m = measureCanvas();
     m.font = fontOf(s);
     var bw = s.borderWidth;
@@ -1286,9 +1314,9 @@
       var probe = tailGeom({ x: 0, y: 0, w: boxW, h: boxH }, s);
       var out = probe ? probe.outer : { l: 0, t: 0, r: 0, b: 0 };
       // 四周留 bw/2 给描边外沿：有尾巴时描边沿轮廓中心线，会向外扩线宽的一半
-      W = Math.max(1, Math.round(boxW + out.l + out.r + bw));
-      H = Math.max(1, Math.round(boxH + out.t + out.b + bw));
-      box = { x: out.l + bw / 2, y: out.t + bw / 2, w: boxW, h: boxH };
+      W = Math.max(1, Math.round(boxW + out.l + out.r + bw)) + extra * 2;
+      H = Math.max(1, Math.round(boxH + out.t + out.b + bw)) + extra * 2;
+      box = { x: out.l + bw / 2 + extra, y: out.t + bw / 2 + extra, w: boxW, h: boxH };
       tg = tailGeom(box, s);
     } else {
       W = Math.max(1, Math.round(s.width));
@@ -1305,6 +1333,10 @@
       var aw2 = Math.max(1, (W - o.l - o.r - bw) / mr), ah2 = Math.max(1, (H - o.t - o.b - bw) / mr);
       box = { x: o.l + bw / 2 + (W - o.l - o.r - bw - aw2) / 2,
               y: o.t + bw / 2 + (H - o.t - o.b - bw - ah2) / 2, w: aw2, h: ah2 };
+      if (extra){
+        W += extra * 2; H += extra * 2;
+        box = { x: box.x + extra, y: box.y + extra, w: box.w, h: box.h };
+      }
       tg = tailGeom(box, s);
       cw = ell ? Math.max(0, box.w / K - bw * 2 - pad * 2)
              : s.shape === 'page'
@@ -1420,9 +1452,10 @@
     if (prev > 0 && cur.length >= 3) out.push(cur);
     return out;
   }
-  function burstHalfStroke(ctx, s, g){
+  // inset：描边路径内缩量（默认线宽/2）；strokeW：线宽（连框模式外移时传 2 倍线宽）
+  function burstHalfStroke(ctx, s, g, inset, strokeW){
     var bw = g.bw, box = g.box;
-    ctx.lineWidth = bw;
+    ctx.lineWidth = strokeW || bw;
     ctx.lineJoin = 'miter';
     ctx.miterLimit = 8;
     ctx.strokeStyle = hexToRgba(s.borderColor, 1);
@@ -1436,7 +1469,7 @@
       for (i = 0; i <= steps; i++) pts.push(bd.pointAt(start + total * i / steps));
     } else {
       var f = burstField(box, s);
-      pts = polarPts(f, f.N || 720, bw / 2);   // 无尾巴时描边内缩半个线宽
+      pts = polarPts(f, f.N || 720, inset === undefined ? bw / 2 : inset);   // 默认描边内缩半个线宽
     }
     ctx.beginPath();
     var segs = riseSegs(pts, cx, cy);
@@ -1467,66 +1500,84 @@
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
-    // 背景 + 边框：有尾巴时用整体轮廓一次成型（根边开放、无内部线）
-    if (g.tail){
-      if (!s.bgTransparent){
-        ctx.fillStyle = hexToRgba(s.bgColor, s.bgOpacity);
-        ctx.beginPath();
-        bubblePath(ctx, s, g);
-        ctx.fill();
-      }
-      if (g.bw > 0){
-        if (s.shape === 'burst' && s.spikeHalf){
-          burstHalfStroke(ctx, s, g);           // 光球半开描边：只描每根刺的一侧
-        } else {
-          ctx.lineWidth = g.bw;
-          ctx.lineJoin = 'miter';
-          ctx.miterLimit = 8;
-          ctx.strokeStyle = hexToRgba(s.borderColor, 1);
-          ctx.beginPath();
-          bubblePath(ctx, s, g);
-          ctx.stroke();
-        }
-      }
-      if (g.tail.dots){
-        // 半圆尾巴后面的小圆：独立绘制（填充 + 描边），描边同样沿中心线
-        g.tail.dots.forEach(function(d){
-          if (!s.bgTransparent){
-            ctx.beginPath();
-            ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2);
-            ctx.fillStyle = hexToRgba(s.bgColor, s.bgOpacity);
-            ctx.fill();
-          }
-          if (g.bw > 0){
-            ctx.beginPath();
-            ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2);
-            ctx.lineWidth = g.bw;
-            ctx.strokeStyle = hexToRgba(s.borderColor, 1);
-            ctx.stroke();
-          }
-        });
-      }
-    } else {
-      if (!s.bgTransparent){
-        ctx.fillStyle = hexToRgba(s.bgColor, s.bgOpacity);
-        ctx.beginPath();
-        shapePath(ctx, s, g, 0);
-        ctx.fill();
-      }
-      if (g.bw > 0){
-        if (s.shape === 'burst' && s.spikeHalf){
-          burstHalfStroke(ctx, s, g);           // 光球半开描边：只描每根刺的一侧
-        } else {
-          ctx.lineWidth = g.bw;
-          ctx.strokeStyle = hexToRgba(s.borderColor, 1);
-          ctx.beginPath();
-          shapePath(ctx, s, g, g.bw / 2);
-          ctx.stroke();
-        }
-      }
-    }
+    frameFill(ctx, s, g);
+    frameStroke(ctx, s, g);
 
-    // 内容区起点：内容矩形始终居中于框（椭圆模式下即椭圆的内接矩形）
+    drawText(ctx, s, g);
+  }
+
+  // 填充框体：有尾巴时整体轮廓（根边开放）一次填充，圆点尾巴的小圆单独填充
+  function frameFill(ctx, s, g){
+    var box = g.box;
+    if (s.bgTransparent) return;
+    ctx.fillStyle = hexToRgba(s.bgColor, s.bgOpacity);
+    ctx.beginPath();
+    if (g.tail) bubblePath(ctx, s, g);
+    else shapePath(ctx, s, g, 0);
+    ctx.fill();
+    if (g.tail && g.tail.dots){
+      g.tail.dots.forEach(function(d){
+        ctx.beginPath();
+        ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    }
+  }
+  // 描边框体：有尾巴时沿整体轮廓中心线，无尾巴时内缩线宽/2
+  function frameStroke(ctx, s, g){
+    if (!(g.bw > 0)) return;
+    if (s.shape === 'burst' && s.spikeHalf){
+      burstHalfStroke(ctx, s, g);           // 光球半开描边：只描每根刺的一侧
+      return;
+    }
+    ctx.lineWidth = g.bw;
+    ctx.lineJoin = 'miter';
+    ctx.miterLimit = 8;
+    ctx.strokeStyle = hexToRgba(s.borderColor, 1);
+    ctx.beginPath();
+    if (g.tail) bubblePath(ctx, s, g);
+    else shapePath(ctx, s, g, g.bw / 2);
+    ctx.stroke();
+    if (g.tail && g.tail.dots){
+      g.tail.dots.forEach(function(d){
+        ctx.beginPath();
+        ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2);
+        ctx.stroke();
+      });
+    }
+  }
+  // 连框模式专用：描边整体外移到轮廓外侧（线带占轮廓外 0～线宽）。
+  // 配合「联合剪影擦除」，每条线的断口端面恰好贴合对方描边带的内缘 → 衔接无缝
+  function frameStrokeOut(ctx, s, g){
+    if (!(g.bw > 0)) return;
+    var bw = g.bw;
+    ctx.lineJoin = 'miter';
+    ctx.miterLimit = 8;
+    ctx.strokeStyle = hexToRgba(s.borderColor, 1);
+    if (s.shape === 'burst' && s.spikeHalf){
+      burstHalfStroke(ctx, s, g, -bw / 2, bw * 2);   // 半开描边：路径外移 + 加宽，外半留在轮廓外
+      return;
+    }
+    ctx.lineWidth = g.tail ? bw * 2 : bw;            // 尾巴沿中心线，加宽一倍让外半留在轮廓外
+    ctx.beginPath();
+    if (g.tail) bubblePath(ctx, s, g);
+    else shapePath(ctx, s, g, -bw / 2);
+    ctx.stroke();
+    if (g.tail && g.tail.dots){
+      ctx.lineWidth = bw;
+      g.tail.dots.forEach(function(d){
+        ctx.beginPath();
+        ctx.arc(d.x, d.y, d.r + bw / 2, 0, Math.PI * 2);
+        ctx.stroke();
+      });
+    }
+  }
+  // 文字绘制：内容区居中于框，支持横竖排与竖排标点旋转
+  function drawText(ctx, s, g){
+    var box = g.box;
+    ctx.font = fontOf(s);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
     var ox = box.x + (box.w - g.cw) / 2;
     var oy = box.y + (box.h - g.ch) / 2;
 
@@ -1576,7 +1627,7 @@
         }
       }
     } else {
-      var startY = s.alignV === 'top' ? oy :
+      var startY2 = s.alignV === 'top' ? oy :
                    s.alignV === 'bottom' ? oy + g.ch - lo.mainLen :
                    oy + (g.ch - lo.mainLen) / 2;
       for (var k = 0; k < lo.blocks.length; k++){
@@ -1584,14 +1635,14 @@
         var lx = s.alignH === 'left' ? ox :
                  s.alignH === 'right' ? ox + g.cw - line.size :
                  ox + (g.cw - line.size) / 2;
-        var cyy = startY + lo.step / 2;
+        var cyy = startY2 + lo.step / 2;
         var x = lx;
         for (var t = 0; t < line.chars.length; t++){
           var c = line.chars[t];
           ctx.fillText(c.ch, x + (c.adv - s.letterSpacing) / 2, cyy);
           x += c.adv;
         }
-        startY += line.chars.length === 0 ? lo.step * 0.6 : lo.step;
+        startY2 += line.chars.length === 0 ? lo.step * 0.6 : lo.step;
       }
     }
 
@@ -1599,29 +1650,435 @@
     ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
   }
 
+  // ---------- 连框模式 ----------
+  // 多个独立气泡放在同一画布上：每个框是完整的参数快照（形状/文字/尾巴/样式），
+  // 重叠处无边框的实现：每个框的描边单独成层，用「其他框的填充形状」做蒙版擦掉
+  // 落在别框内的部分——自家描边内半保留（线宽视觉不变），重叠区两家描边都消失
+  var multi = { on: false, frames: [], act: 0 };
+  var lastView = { W: 1, H: 1 };
+
+  function multiItems(){
+    return multi.frames.map(function(f){
+      // extra = 线宽/2：连框描边整体外移到轮廓外，局部画布四周多留半条线
+      return { s: f.st, g: computeGeometry(f.st, (f.st.borderWidth || 0) / 2), fx: f.fx, fy: f.fy };
+    });
+  }
+  function multiSize(items){
+    var W = 1, H = 1;
+    items.forEach(function(it){
+      W = Math.max(W, Math.ceil(it.fx + it.g.W));
+      H = Math.max(H, Math.ceil(it.fy + it.g.H));
+    });
+    return { W: W, H: H };
+  }
+  // 预览专用：选中框的蓝色虚线标记（只画在预览画布上，导出不含）
+  // 缩放手柄：右下角 = 等比缩放；四边中点 = 单轴拉伸（左/上拖动时对边固定，位置联动）
+  function selHandlePts(it){
+    var b = it.g.box, bw = it.g.bw || 0;
+    var x0 = it.fx + b.x - bw, y0 = it.fy + b.y - bw;
+    var x1 = x0 + b.w + bw * 2, y1 = y0 + b.h + bw * 2;
+    var cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+    return [
+      { id: 'se', x: x1, y: y1, cursor: 'nwse-resize' },
+      { id: 'e',  x: x1, y: cy, cursor: 'ew-resize' },
+      { id: 'w',  x: x0, y: cy, cursor: 'ew-resize' },
+      { id: 's',  x: cx, y: y1, cursor: 'ns-resize' },
+      { id: 'n',  x: cx, y: y0, cursor: 'ns-resize' }
+    ];
+  }
+  function drawSelBox(ctx, it, scale, W, H){
+    var b = it.g.box, bw = it.g.bw || 0;
+    ctx.setTransform(scale, 0, 0, scale, 0, 0);
+    ctx.strokeStyle = 'rgba(41,121,255,0.9)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([6, 4]);
+    // 虚线框整体限制在画布内 1px：贴画布边的边若被裁掉一半，粗细会与其他边不一致
+    var rx = it.fx + b.x - bw, ry = it.fy + b.y - bw;
+    var x0 = Math.min(Math.max(rx, 1), (W || 1e9) - 1);
+    var y0 = Math.min(Math.max(ry, 1), (H || 1e9) - 1);
+    var x1 = Math.min(Math.max(rx + b.w + bw * 2, 1), (W || 1e9) - 1);
+    var y1 = Math.min(Math.max(ry + b.h + bw * 2, 1), (H || 1e9) - 1);
+    ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+    ctx.setLineDash([]);
+    selHandlePts(it).forEach(function(hd){
+      // 手柄限制在画布内：框贴住画布边时圆点不会被裁掉一半（与命中检测共用同一 clamp）
+      var x = Math.min(Math.max(hd.x, HANDLE_PAD), (W || 1e9) - HANDLE_PAD);
+      var y = Math.min(Math.max(hd.y, HANDLE_PAD), (H || 1e9) - HANDLE_PAD);
+      ctx.beginPath();
+      ctx.arc(x, y, 5, 0, Math.PI * 2);
+      ctx.fillStyle = '#ffffff';
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = 'rgba(41,121,255,0.9)';
+      ctx.stroke();
+    });
+  }
+  // 连框渲染（联合外描边）：
+  // 1) 所有框的描边画在轮廓外侧（frameStrokeOut）；
+  // 2) 用所有框形状的联合剪影（不膨胀）擦掉落在联合体内部的描边；
+  // 3) 每条描边的断口端面 = 联合体边界 = 对方描边带的内缘 → 衔接处严丝合缝，
+  //    重叠区内部无线，透明背景（空心框）同样成立
+  function drawMulti(ctx, items, W, H, scale){
+    var pw = Math.max(1, Math.round(W * scale)), ph = Math.max(1, Math.round(H * scale));
+    ctx.setTransform(scale, 0, 0, scale, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    // 联合剪影 U（所有框的填充形状并集，含尾巴与圆点）
+    var mk = document.createElement('canvas');
+    mk.width = pw; mk.height = ph;
+    var mc = mk.getContext('2d');
+    mc.setTransform(scale, 0, 0, scale, 0, 0);
+    mc.fillStyle = '#000';
+    items.forEach(function(it){
+      mc.save(); mc.translate(it.fx, it.fy);
+      mc.beginPath();
+      if (it.g.tail) bubblePath(mc, it.s, it.g);
+      else shapePath(mc, it.s, it.g, 0);
+      mc.fill();
+      if (it.g.tail && it.g.tail.dots){
+        it.g.tail.dots.forEach(function(d){
+          mc.beginPath(); mc.arc(d.x, d.y, d.r, 0, Math.PI * 2); mc.fill();
+        });
+      }
+      mc.restore();
+    });
+    // 填充层：先画所有框的填充（重叠区自然连通）
+    items.forEach(function(it){
+      ctx.save(); ctx.translate(it.fx, it.fy);
+      frameFill(ctx, it.s, it.g);
+      ctx.restore();
+    });
+    // 描边：逐框外移描边 → 擦掉联合体内部 → 合成
+    items.forEach(function(it){
+      var sl = document.createElement('canvas');
+      sl.width = pw; sl.height = ph;
+      var sc = sl.getContext('2d');
+      sc.setTransform(scale, 0, 0, scale, 0, 0);
+      sc.translate(it.fx, it.fy);
+      frameStrokeOut(sc, it.s, it.g);
+      sc.setTransform(1, 0, 0, 1, 0, 0);
+      sc.globalCompositeOperation = 'destination-out';
+      sc.drawImage(mk, 0, 0);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.drawImage(sl, 0, 0);
+      ctx.setTransform(scale, 0, 0, scale, 0, 0);
+    });
+    // 文字最上层
+    items.forEach(function(it){
+      ctx.save(); ctx.translate(it.fx, it.fy);
+      drawText(ctx, it.s, it.g);
+      ctx.restore();
+    });
+  }
+  function refreshFrameSel(){
+    var sel = $('frameSel');
+    sel.innerHTML = '';
+    multi.frames.forEach(function(f, i){
+      var o = document.createElement('option');
+      o.value = String(i);
+      var t = String(f.st.text || '').replace(/\s+/g, ' ').trim().slice(0, 8);
+      o.textContent = '框 ' + (i + 1) + (t ? '：' + t : '');
+      sel.appendChild(o);
+    });
+    sel.value = String(multi.act);
+  }
+  // state() 快照里已除以 100 的滑杆，恢复控件时乘回去
+  var PCT_FIELDS = { bgOpacity: 100, tailCurl: 100 };
+  function applyFrameToUI(st){
+    tplIds().forEach(function(id){
+      if (!(id in st)) return;
+      var el = $(id);
+      if (el.type === 'checkbox') el.checked = !!st[id];
+      else if (PCT_FIELDS[id]) el.value = st[id] * PCT_FIELDS[id];
+      else el.value = st[id];
+    });
+    if (st.direction){
+      var rs = document.getElementsByName('direction');
+      for (var i = 0; i < rs.length; i++) rs[i].checked = (rs[i].value === st.direction);
+    }
+    if (typeof st.wobbleSeed === 'number') wobbleSeed = st.wobbleSeed >>> 0;
+    var nm = st.fontFamily ? String(st.fontFamily).replace(/^"|"$/g, '') : '';
+    customFontName = userFonts[nm] ? nm : null;
+    Object.keys(syncFns).forEach(function(k){ syncFns[k](); });
+    syncMode();
+  }
+  function selectFrame(idx){
+    if (multi.frames[multi.act]) multi.frames[multi.act].st = state();  // 先存回当前编辑
+    multi.act = idx;
+    applyFrameToUI(multi.frames[idx].st);
+    refreshFrameSel();
+    $('frameX').value = multi.frames[idx].fx;
+    $('frameY').value = multi.frames[idx].fy;
+    render();
+  }
+
   // ---------- 预览 / 导出 ----------
-  function render(){
-    var s = state();
-    var g = computeGeometry(s);
+  function render(preItems){
     var dpr = Math.min(window.devicePixelRatio || 1, 2);
-    cv.width = Math.round(g.W * dpr);
-    cv.height = Math.round(g.H * dpr);
-    cv.style.width = g.W + 'px'; // 高度交给 CSS height:auto，缩放时保持比例
-    draw(cv.getContext('2d'), s, g, dpr);
-    $('info').textContent = '画布 ' + g.W + ' × ' + g.H + ' px';
+    var W, H;
+    if (multi.on && multi.frames.length){
+      var f = multi.frames[multi.act];
+      if (preItems && preItems.length){
+        // 拖动中（传入缓存数组）：几何已缓存，只更新选中框的位置
+        // 注意不能只判 truthy——事件监听直接绑 render 时，浏览器会把事件对象当首参传入
+        var cur = preItems[multi.act];
+        cur.fx = f.fx; cur.fy = f.fy;
+      } else {
+        f.st = state();                     // 控件即当前框
+        f.fx = Math.round(num('frameX'));
+        f.fy = Math.round(num('frameY'));
+        refreshFrameSel();
+      }
+      var items = preItems || multiItems();
+      var sz = multiSize(items);
+      W = sz.W; H = sz.H;
+      cv.width = Math.round(W * dpr);
+      cv.height = Math.round(H * dpr);
+      cv.style.width = W + 'px';
+      drawMulti(cv.getContext('2d'), items, W, H, dpr);
+      if (selBoxOn) drawSelBox(cv.getContext('2d'), items[multi.act], dpr, W, H);
+    } else {
+      var s = state();
+      var g = computeGeometry(s);
+      W = g.W; H = g.H;
+      cv.width = Math.round(W * dpr);
+      cv.height = Math.round(H * dpr);
+      cv.style.width = W + 'px'; // 高度交给 CSS height:auto，缩放时保持比例
+      draw(cv.getContext('2d'), s, g, dpr);
+      if (selBoxOn) drawSelBox(cv.getContext('2d'), { s: s, g: g, fx: 0, fy: 0 }, dpr, W, H);
+    }
+    lastView = { W: W, H: H };
+    $('info').textContent = '画布 ' + W + ' × ' + H + ' px' +
+      (multi.on ? '（连框 ' + multi.frames.length + ' 个）' : '');
   }
 
   function exportCanvas(scale){
-    var s = state();
-    var g = computeGeometry(s);
     var c = document.createElement('canvas');
-    c.width = Math.round(g.W * scale);
-    c.height = Math.round(g.H * scale);
-    draw(c.getContext('2d'), s, g, scale);
+    if (multi.on && multi.frames.length){
+      var items = multiItems();
+      var sz = multiSize(items);
+      c.width = Math.round(sz.W * scale);
+      c.height = Math.round(sz.H * scale);
+      drawMulti(c.getContext('2d'), items, sz.W, sz.H, scale);
+    } else {
+      var s = state();
+      var g = computeGeometry(s);
+      c.width = Math.round(g.W * scale);
+      c.height = Math.round(g.H * scale);
+      draw(c.getContext('2d'), s, g, scale);
+    }
     return c;
   }
 
   function msg(t){ $('msg').textContent = t; }
+
+  // ---------- 连框模式交互 ----------
+  $('multiOn').addEventListener('change', function(){
+    multi.on = this.checked;
+    $('multiDetails').style.display = multi.on ? '' : 'none';
+    if (multi.on && !multi.frames.length){
+      multi.frames = [{ st: state(), fx: 0, fy: 0 }];
+      multi.act = 0;
+      refreshFrameSel();
+    }
+    if (multi.on) msg('连框模式：每个框独立编辑文字、形状与尾巴，重叠处自动无边框');
+    render();
+  });
+  $('frameSel').addEventListener('change', function(){
+    var i = parseInt(this.value, 10);
+    if (!isNaN(i) && multi.frames[i]) selectFrame(i);
+  });
+  $('btnFrameAdd').addEventListener('click', function(){
+    if (!multi.on) return;
+    multi.frames[multi.act].st = state();
+    var cur = multi.frames[multi.act];
+    var gw = computeGeometry(cur.st).W;
+    var st2 = JSON.parse(JSON.stringify(cur.st));   // 复制当前框的全部样式
+    multi.frames.push({ st: st2, fx: cur.fx + Math.round(gw * 0.45), fy: cur.fy + Math.round(computeGeometry(cur.st).H * 0.3) });
+    selectFrame(multi.frames.length - 1);
+    msg('已新增框（复制当前框样式），在预览中拖动让它与原框重叠');
+  });
+  $('btnFrameDel').addEventListener('click', function(){
+    if (!multi.on) return;
+    if (multi.frames.length <= 1){ msg('至少保留一个框'); return; }
+    multi.frames.splice(multi.act, 1);
+    selectFrame(Math.max(0, multi.act - 1));
+  });
+  ['frameX', 'frameY'].forEach(function(id){
+    $(id).addEventListener('change', function(){
+      if (!multi.on) return;
+      var f = multi.frames[multi.act];
+      f.fx = Math.round(num('frameX'));
+      f.fy = Math.round(num('frameY'));
+      render();
+    });
+  });
+
+  // 预览点选 / 拖动（连框模式）
+  var dragSt = null;
+  var hitCtx = document.createElement('canvas').getContext('2d');
+  function canvasPt(e){
+    var r = cv.getBoundingClientRect();
+    return {
+      x: (e.clientX - r.left) * (lastView.W / (r.width || 1)),
+      y: (e.clientY - r.top) * (lastView.H / (r.height || 1))
+    };
+  }
+  function framePath2D(s, g){
+    var p = new Path2D();
+    if (g.tail) bubblePath(p, s, g);
+    else shapePath(p, s, g, 0);
+    if (g.tail && g.tail.dots){
+      g.tail.dots.forEach(function(d){
+        p.moveTo(d.x + d.r, d.y);
+        p.arc(d.x, d.y, d.r, 0, Math.PI * 2);
+      });
+    }
+    return p;
+  }
+  function hitFrame(x, y, preItems){
+    var items = preItems || multiItems();
+    for (var i = items.length - 1; i >= 0; i--){
+      var it = items[i];
+      hitCtx.save();
+      hitCtx.translate(it.fx, it.fy);
+      var ok = hitCtx.isPointInPath(framePath2D(it.s, it.g), x, y);
+      hitCtx.restore();
+      if (ok) return i;
+    }
+    return -1;
+  }
+  var HANDLE_R = 10;                                     // 手柄命中半径（画布像素）
+  var HANDLE_PAD = 7;                                    // 手柄中心距画布边的最小距离（与绘制 clamp 一致）
+  function handleHit(x, y, it){                          // 命中的手柄（含画布内 clamp），绘制与命中共用
+    var best = null, bestD = HANDLE_R;
+    selHandlePts(it).forEach(function(hd){
+      var hx = Math.min(Math.max(hd.x, HANDLE_PAD), (lastView.W || 1e9) - HANDLE_PAD);
+      var hy = Math.min(Math.max(hd.y, HANDLE_PAD), (lastView.H || 1e9) - HANDLE_PAD);
+      var d = Math.hypot(x - hx, y - hy);
+      if (d <= bestD){ bestD = d; best = hd; }
+    });
+    return best;
+  }
+  cv.addEventListener('pointerdown', function(e){
+    // 手柄缩放两种模式通用：连框作用于当前框，普通模式作用于整个画布
+    var isMulti = multi.on && multi.frames.length > 0;
+    if (multi.on && !isMulti) return;
+    var p = canvasPt(e);
+    var items = null, it;
+    if (isMulti){ items = multiItems(); it = items[multi.act]; }
+    else { var s0 = state(); it = { s: s0, g: computeGeometry(s0), fx: 0, fy: 0 }; }
+    // 白点手柄：进入缩放模式（se 等比，e/w 拉宽，s/n 拉高）
+    var hd0 = handleHit(p.x, p.y, it);
+    if (hd0){
+      var fr = isMulti ? multi.frames[multi.act] : null;
+      var st0 = fr ? fr.st : s0;
+      var bwNow = st0.borderWidth || 0;
+      var extra0 = isMulti ? bwNow / 2 : 0;              // 连框局部画布含半条线的余量
+      var gNow = computeGeometry(st0, extra0);
+      if (st0.autoSize){                                 // 自动尺寸切手动，以当前实际大小为基准
+        st0.autoSize = false;
+        $('autoSize').checked = false;
+        syncMode();
+      }
+      var nw0 = Math.max(16, Math.round(gNow.W - extra0 * 2));
+      var nh0 = Math.max(16, Math.round(gNow.H - extra0 * 2));
+      if (fr){ fr.st.width = nw0; fr.st.height = nh0; }
+      $('width').value = nw0;
+      $('height').value = nh0;
+      dragSt = { mode: 'resize', handle: hd0.id, multi: isMulti,
+                 px0: p.x, py0: p.y,
+                 fx0: fr ? fr.fx : 0, fy0: fr ? fr.fy : 0, w0: gNow.W, h0: gNow.H };
+      try { cv.setPointerCapture(e.pointerId); } catch (err) {}
+      render();
+      msg(hd0.id === 'se' ? '拖动角点等比缩放（已切换为手动尺寸）'
+        : '拖动边中点沿该方向拉伸（已切换为手动尺寸）');
+      return;
+    }
+    if (!items) return;
+    var idx = hitFrame(p.x, p.y, items);
+    if (idx < 0) return;
+    if (idx !== multi.act) selectFrame(idx);
+    var f = multi.frames[idx];
+    dragSt = { mode: 'move', sx: p.x, sy: p.y, ox: f.fx, oy: f.fy, items: multiItems() };
+    try { cv.setPointerCapture(e.pointerId); } catch (err) {}
+  });
+  cv.addEventListener('pointermove', function(e){
+    if (dragSt){
+      var p = canvasPt(e);
+      if (dragSt.mode === 'resize'){
+        var hd = dragSt.handle;
+        var isMulti = dragSt.multi;
+        var fr = isMulti ? multi.frames[multi.act] : null;
+        var bw2 = isMulti ? fr.st.borderWidth || 0 : num('borderWidth');
+        var ex2 = isMulti ? bw2 : 0;                     // 连框画布宽含整条线余量，普通模式不含
+        // kx/ky：按「指针相对抓取点的位移」算比例——抓取瞬间恒为 1，
+        // 与手柄显示位置是否被 clamp 无关；左/上柄拖动方向取反（往左拖 = 变宽）
+        var dx = (p.x - dragSt.px0) / Math.max(1, dragSt.w0);
+        var dy = (p.y - dragSt.py0) / Math.max(1, dragSt.h0);
+        var kx = null, ky = null;
+        if (hd === 'se'){ var k = 1 + Math.max(dx, dy); kx = k; ky = k; }   // 角点：等比
+        else if (hd === 'e') kx = 1 + dx;                        // 右中点：只拉宽
+        else if (hd === 'w') kx = 1 - dx;
+        else if (hd === 's') ky = 1 + dy;                        // 下中点：只拉高
+        else if (hd === 'n') ky = 1 - dy;
+        if (kx !== null){
+          kx = Math.min(10, Math.max((16 + ex2) / Math.max(1, dragSt.w0), kx));
+          var nw = Math.max(16, Math.round(dragSt.w0 * kx - ex2));
+          if (isMulti) fr.st.width = nw;
+          if (hd === 'w' && isMulti) fr.fx = Math.round(dragSt.fx0 + dragSt.w0 - (nw + bw2));  // 右缘固定
+          $('width').value = nw;
+        }
+        if (ky !== null){
+          ky = Math.min(10, Math.max((16 + ex2) / Math.max(1, dragSt.h0), ky));
+          var nh = Math.max(16, Math.round(dragSt.h0 * ky - ex2));
+          if (isMulti) fr.st.height = nh;
+          if (hd === 'n' && isMulti) fr.fy = Math.round(dragSt.fy0 + dragSt.h0 - (nh + bw2));  // 下缘固定
+          $('height').value = nh;
+        }
+        if (isMulti){
+          $('frameX').value = fr.fx;
+          $('frameY').value = fr.fy;
+        }
+        render();                                        // 尺寸变了，几何需全量重算
+        return;
+      }
+      var f = multi.frames[multi.act];
+      f.fx = Math.round(dragSt.ox + p.x - dragSt.sx);
+      f.fy = Math.round(dragSt.oy + p.y - dragSt.sy);
+      $('frameX').value = f.fx;
+      $('frameY').value = f.fy;
+      render(dragSt.items);
+      return;
+    }
+    // 未按下：悬停光标提示（手柄 = 缩放，框内 = 移动）
+    var q = canvasPt(e);
+    var nearEdge = q.x <= HANDLE_R + 2 || q.y <= HANDLE_R + 2 ||
+                   q.x >= lastView.W - HANDLE_R - 2 || q.y >= lastView.H - HANDLE_R - 2;
+    if (!nearEdge){ cv.style.cursor = ''; return; }
+    var hit = null, itH;
+    if (multi.on && multi.frames.length){
+      var items = multiItems();
+      itH = items[multi.act];
+      hit = handleHit(q.x, q.y, itH);
+      if (!hit) hit = hitFrame(q.x, q.y, items) >= 0 ? { cursor: 'move' } : null;
+    } else if (!multi.on){
+      var sv = state();
+      itH = { s: sv, g: computeGeometry(sv), fx: 0, fy: 0 };
+      hit = handleHit(q.x, q.y, itH);
+    }
+    cv.style.cursor = hit ? hit.cursor : '';
+  });
+  ['pointerup', 'pointercancel'].forEach(function(ev){
+    cv.addEventListener(ev, function(){ dragSt = null; });
+  });
+
+  // 辅助框显隐：隐藏后仍可点选/拖动/缩放，只是不画蓝色标记
+  var selBoxOn = true;
+  $('btnSelBox').addEventListener('click', function(){
+    selBoxOn = !selBoxOn;
+    this.textContent = selBoxOn ? '隐藏辅助框' : '显示辅助框';
+    render();
+  });
 
   $('btnPng').addEventListener('click', function(){
     var scale = parseFloat($('exportScale').value);
@@ -1802,7 +2259,8 @@
   function tplIds(){
     return Array.prototype.slice.call(document.querySelectorAll('input[id],select[id],textarea[id]'))
       .filter(function(el){
-        return el.id !== 'text' && el.id !== 'tplName' && el.type !== 'file';
+        return el.id !== 'text' && el.id !== 'tplName' && el.type !== 'file' &&
+               ['multiOn', 'frameSel', 'btnFrameAdd', 'btnFrameDel', 'frameX', 'frameY'].indexOf(el.id) < 0;
       })
       .map(function(el){ return el.id; });
   }
