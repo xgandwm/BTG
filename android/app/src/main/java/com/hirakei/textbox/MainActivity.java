@@ -16,6 +16,7 @@ import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.FrameLayout;
 import android.widget.Toast;
 
 import androidx.core.graphics.Insets;
@@ -37,11 +38,15 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
 
         web = new WebView(this);
-        setContentView(web);
+        // WebView 自身 setPadding 不可靠（内容常不缩进），包进容器、padding 加在容器上
+        FrameLayout root = new FrameLayout(this);
+        root.addView(web, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        setContentView(root);
 
-        // targetSdk 35 在 Android 15 强制 edge-to-edge：给 WebView 加系统栏避让内边距，
+        // targetSdk 35 在 Android 15 强制 edge-to-edge：容器加系统栏避让内边距，
         // 否则页面顶部导航会和手机状态栏（消息/时间栏）重叠
-        ViewCompat.setOnApplyWindowInsetsListener(web, (v, insets) -> {
+        ViewCompat.setOnApplyWindowInsetsListener(root, (v, insets) -> {
             Insets bars = insets.getInsets(
                     WindowInsetsCompat.Type.statusBars()
                             | WindowInsetsCompat.Type.navigationBars()
@@ -92,9 +97,13 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        if (requestCode == REQ_FILE_CHOOSER && fileChooserCallback != null) {
-            fileChooserCallback.onReceiveValue(
-                    WebChromeClient.FileChooserParams.parseResult(resultCode, data));
+        if (requestCode == REQ_FILE_CHOOSER) {
+            if (fileChooserCallback != null) {
+                fileChooserCallback.onReceiveValue(
+                        WebChromeClient.FileChooserParams.parseResult(resultCode, data));
+            } else {
+                toast("选择结果丢失，请重试");   // Activity 在选择器期间被回收时 callback 会失效
+            }
             fileChooserCallback = null;
         } else {
             super.onActivityResult(requestCode, resultCode, data);

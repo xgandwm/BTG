@@ -2988,6 +2988,7 @@
   $('compFile').addEventListener('change', function(e){
     var files = Array.prototype.slice.call(e.target.files || []);
     if (!files.length) return;
+    compMsg('已收到 ' + files.length + ' 个文件，正在加载…');   // 诊断：确认选择器 → 页面链路是否打通
     var pending = files.length;
     files.forEach(function(f){
       // blob URL 加载（比 dataURL 省内存、更快）；失败必须提示，否则真机上无声无息
