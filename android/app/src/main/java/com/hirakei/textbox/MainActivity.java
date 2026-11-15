@@ -9,6 +9,7 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.provider.MediaStore;
 import android.util.Base64;
+import android.view.View;
 import android.webkit.JavascriptInterface;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -16,6 +17,10 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Toast;
+
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
 
 import java.io.OutputStream;
 
@@ -33,6 +38,17 @@ public class MainActivity extends Activity {
 
         web = new WebView(this);
         setContentView(web);
+
+        // targetSdk 35 在 Android 15 强制 edge-to-edge：给 WebView 加系统栏避让内边距，
+        // 否则页面顶部导航会和手机状态栏（消息/时间栏）重叠
+        ViewCompat.setOnApplyWindowInsetsListener(web, (v, insets) -> {
+            Insets bars = insets.getInsets(
+                    WindowInsetsCompat.Type.statusBars()
+                            | WindowInsetsCompat.Type.navigationBars()
+                            | WindowInsetsCompat.Type.displayCutout());
+            v.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+            return WindowInsetsCompat.CONSUMED;
+        });
 
         WebSettings st = web.getSettings();
         st.setJavaScriptEnabled(true);
@@ -59,7 +75,9 @@ public class MainActivity extends Activity {
                 if (fileChooserCallback != null) fileChooserCallback.onReceiveValue(null);
                 fileChooserCallback = callback;
                 try {
-                    startActivityForResult(params.createIntent(), REQ_FILE_CHOOSER);
+                    Intent i = params.createIntent();
+                    i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);   // 确保 WebView 能读取所选 content:// 文件
+                    startActivityForResult(i, REQ_FILE_CHOOSER);
                     return true;
                 } catch (Exception e) {
                     fileChooserCallback = null;

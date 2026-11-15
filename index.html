@@ -2990,17 +2990,22 @@
     if (!files.length) return;
     var pending = files.length;
     files.forEach(function(f){
-      var fr = new FileReader();
-      fr.onload = function(){
-        var img = new Image();
-        img.onload = function(){
-          addLayer(img, (f.name || '图片').replace(/\.[^.]+$/, '').slice(0, 12), img.naturalWidth, img.naturalHeight);
-          compMsg('已添加图层：' + img.naturalWidth + '×' + img.naturalHeight + ' px');
-          if (--pending === 0) e.target.value = '';
-        };
-        img.src = fr.result;
+      // blob URL 加载（比 dataURL 省内存、更快）；失败必须提示，否则真机上无声无息
+      var url = URL.createObjectURL(f);
+      var img = new Image();
+      img.onload = function(){
+        URL.revokeObjectURL(url);
+        addLayer(img, (f.name || '图片').replace(/\.[^.]+$/, '').slice(0, 12), img.naturalWidth, img.naturalHeight);
+        compMsg('已添加图层：' + img.naturalWidth + '×' + img.naturalHeight + ' px' +
+                (img.naturalWidth * img.naturalHeight > 16e6 ? '（大图已自动缩放显示）' : ''));
+        if (--pending === 0) e.target.value = '';
       };
-      fr.readAsDataURL(f);
+      img.onerror = function(){
+        URL.revokeObjectURL(url);
+        compMsg('图片加载失败：' + (f.name || '未命名') + '（可能是不受支持的格式，如 HEIC/HEIF 相机原格式，请用 JPG/PNG）');
+        if (--pending === 0) e.target.value = '';
+      };
+      img.src = url;
     });
   });
   $('btnCompText').addEventListener('click', function(){

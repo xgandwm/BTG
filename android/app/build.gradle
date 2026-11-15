@@ -28,4 +28,5 @@ android {
 }
 
 dependencies {
+    implementation 'androidx.core:core:1.13.1'   // WindowInsetsCompat：targetSdk 35 强制 edge-to-edge 后避让系统栏
 }
