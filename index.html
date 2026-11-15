@@ -2368,22 +2368,57 @@
     }, 'image/png');
   });
 
+  // ---------- App 内自建选文件通道（绕开 WebView file chooser 真机回传问题） ----------
+  var inApp = typeof window.AndroidBridge !== 'undefined' && window.AndroidBridge !== null;
+  var appPickCb = null;
+  window.__appPickCb = function(list){
+    var cb = appPickCb; appPickCb = null;
+    if (cb) cb(Array.isArray(list) ? list : []);
+  };
+  function appPick(mime, cb){
+    if (!inApp) return false;
+    appPickCb = cb;
+    window.AndroidBridge.pick(mime, '__appPickCb');
+    return true;
+  }
+  function dataUrlToBuf(durl){
+    var b64 = durl.split(',')[1] || '';
+    var bin = atob(b64);
+    var u8 = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    return u8.buffer;
+  }
+  function handleFontBuffer(name, buf){
+    fontSave(name, buf.slice(0)).then(function(){}, function(){
+      // 保存失败不影响本次使用，只是下次需要重新上传
+      setTimeout(function(){ msg('字体已加载，但保存失败（可能超出本机容量）'); }, 0);
+    });
+    fontRegister(name, buf.slice(0)).then(function(){
+      selectFont(name);
+      render();
+      msg('已加载并保存字体：' + name);
+    }).catch(function(){ msg('字体加载失败'); });
+  }
+  if (inApp){
+    // App 模式标识：确认装的是新包；并拦截字体 input 的原生选择器改走自建通道
+    setTimeout(function(){ compMsg('App 模式 v2：自建选图通道已启用'); }, 800);
+    $('fontFile').addEventListener('click', function(e){
+      if (appPick('*/*', function(list){
+        if (!list.length){ msg('未选择字体文件'); return; }
+        var durl = list[0];
+        if (!durl || durl.indexOf(',') < 0){ msg('字体文件读取失败'); return; }
+        handleFontBuffer('UserFont_' + Date.now() % 10000, dataUrlToBuf(durl));
+      })){ e.preventDefault(); }
+    });
+  }
+
   $('fontFile').addEventListener('change', function(e){
     var f = e.target.files && e.target.files[0];
     if (!f) return;
     var name = (f.name || 'UserFont').replace(/\.(ttf|otf|woff2?)$/i, '') || 'UserFont';
     var fr = new FileReader();
     fr.onload = function(){
-      var buf = fr.result;
-      fontSave(name, buf.slice(0)).then(function(){}, function(){
-        // 保存失败不影响本次使用，只是下次需要重新上传
-        setTimeout(function(){ msg('字体已加载，但保存失败（可能超出本机容量）'); }, 0);
-      });
-      fontRegister(name, buf.slice(0)).then(function(){
-        selectFont(name);
-        render();
-        msg('已加载并保存字体：' + name);
-      }).catch(function(){ msg('字体加载失败'); });
+      handleFontBuffer(name, fr.result);
     };
     fr.onerror = function(){ msg('字体读取失败'); };
     fr.readAsArrayBuffer(f);
@@ -3001,11 +3036,38 @@
     $('compCropGroup').style.display = 'none';
     syncCompSel();
   }
-  $('btnCompImg').addEventListener('click', function(){ $('compFile').click(); });
+  $('btnCompImg').addEventListener('click', function(){
+    // App 内走自建选图通道（WebView 原生 file chooser 在真机回传不可靠）；浏览器走原生 input
+    if (appPick('image/*', function(list){
+      if (!list.length){ compMsg('未选择文件'); return; }
+      compMsg('已收到 ' + list.length + ' 个文件，正在加载…');
+      var pending = list.length;
+      list.forEach(function(durl, idx){
+        if (!durl){
+          compMsg('第 ' + (idx + 1) + ' 个文件读取失败');
+          if (--pending === 0) syncCompSel();
+          return;
+        }
+        var img = new Image();
+        img.onload = function(){
+          addLayer(img, '图片' + (idx > 0 ? idx + 1 : ''), img.naturalWidth, img.naturalHeight);
+          compMsg('已添加图层：' + img.naturalWidth + '×' + img.naturalHeight + ' px' +
+                  (img.naturalWidth * img.naturalHeight > 16e6 ? '（大图已自动缩放显示）' : ''));
+          if (--pending === 0) syncCompSel();
+        };
+        img.onerror = function(){
+          compMsg('图片解码失败（可能是不受支持的格式，如 HEIC/HEIF，请用 JPG/PNG）');
+          if (--pending === 0) syncCompSel();
+        };
+        img.src = durl;
+      });
+    })) return;
+    $('compFile').click();
+  });
   $('compFile').addEventListener('change', function(e){
     var files = Array.prototype.slice.call(e.target.files || []);
     if (!files.length) return;
-    compMsg('已收到 ' + files.length + ' 个文件，正在加载…');   // 诊断：确认选择器 → 页面链路是否打通
+    compMsg('已收到 ' + files.length + ' 个文件，正在加载…');
     var pending = files.length;
     files.forEach(function(f){
       // blob URL 加载（比 dataURL 省内存、更快）；失败必须提示，否则真机上无声无息

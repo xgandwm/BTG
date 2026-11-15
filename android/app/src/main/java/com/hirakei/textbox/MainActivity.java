@@ -2,6 +2,7 @@ package com.hirakei.textbox;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.content.ClipData;
 import android.content.ContentValues;
 import android.content.Intent;
 import android.net.Uri;
@@ -23,14 +24,19 @@ import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.ArrayList;
 
 public class MainActivity extends Activity {
 
-    private static final int REQ_FILE_CHOOSER = 100;
+    private static final int REQ_FILE_CHOOSER = 100;   // WebView 原生 file chooser（网页兜底用）
+    private static final int REQ_APP_PICK = 101;       // 自建选文件通道（绕开 WebView 回传兼容性问题）
 
     private WebView web;
     private ValueCallback<Uri[]> fileChooserCallback;
+    private String pickJs = null;                      // 自建通道回传时要调用的 JS 函数名
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -97,6 +103,42 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        if (requestCode == REQ_APP_PICK) {
+            final String jsFunc = pickJs;
+            pickJs = null;
+            if (jsFunc == null) return;
+            ArrayList<Uri> uris = new ArrayList<>();
+            if (data != null) {
+                ClipData cd = data.getClipData();           // 多选
+                if (cd != null) {
+                    for (int i = 0; i < cd.getItemCount(); i++) {
+                        Uri u = cd.getItemAt(i).getUri();
+                        if (u != null) uris.add(u);
+                    }
+                } else if (data.getData() != null) {        // 单选
+                    uris.add(data.getData());
+                }
+            }
+            if (uris.isEmpty()) { evaluate(jsFunc + "([])"); return; }
+            final ArrayList<Uri> list = uris;
+            new Thread(new Runnable() {                     // 读文件放后台，避免卡 UI
+                @Override
+                public void run() {
+                    StringBuilder arr = new StringBuilder("[");
+                    for (int i = 0; i < list.size(); i++) {
+                        if (i > 0) arr.append(",");
+                        arr.append("\"").append(uriToDataUrl(list.get(i))).append("\"");
+                    }
+                    arr.append("]");
+                    final String payload = jsFunc + "(" + arr + ")";
+                    web.post(new Runnable() {
+                        @Override
+                        public void run() { web.evaluateJavascript(payload, null); }
+                    });
+                }
+            }).start();
+            return;
+        }
         if (requestCode == REQ_FILE_CHOOSER) {
             if (fileChooserCallback != null) {
                 fileChooserCallback.onReceiveValue(
@@ -110,6 +152,43 @@ public class MainActivity extends Activity {
         }
     }
 
+    /** content:// → dataURL（魔数推断 MIME，选字体的系统类型常为空） */
+    private String uriToDataUrl(Uri uri) {
+        InputStream is = null;
+        try {
+            is = getContentResolver().openInputStream(uri);
+            if (is == null) return "";
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            int b1 = is.read(), b2 = is.read();
+            String mime = getContentResolver().getType(uri);
+            if (mime == null || mime.isEmpty()) {
+                if (b1 == 0x89 && b2 == 0x50) mime = "image/png";
+                else if (b1 == 0xFF && b2 == 0xD8) mime = "image/jpeg";
+                else if (b1 == 0x47 && b2 == 0x49) mime = "image/gif";
+                else if (b1 == 0x00 && b2 == 0x01) mime = "font/ttf";
+                else if (b1 == 0x77 && b2 == 0x4F) mime = "font/woff";
+                else mime = "application/octet-stream";
+            }
+            bos.write(b1);
+            if (b2 >= 0) bos.write(b2);
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = is.read(buf)) > 0) bos.write(buf, 0, n);
+            return "data:" + mime + ";base64," + Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP);
+        } catch (Exception e) {
+            return "";
+        } finally {
+            try { if (is != null) is.close(); } catch (Exception ignored) {}
+        }
+    }
+
+    private void evaluate(final String js) {
+        web.post(new Runnable() {
+            @Override
+            public void run() { web.evaluateJavascript(js, null); }
+        });
+    }
+
     @Override
     public void onBackPressed() {
         if (web != null && web.canGoBack()) web.goBack();
@@ -118,6 +197,29 @@ public class MainActivity extends Activity {
 
     /** 暴露给页面 JS：window.AndroidBridge.savePng(base64, filename) */
     private class Bridge {
+        @JavascriptInterface
+        public String ver() { return "2"; }   // 通道版本，页面据此确认装的是新包
+
+        /** 自建选文件通道：系统选择器 → 读文件转 dataURL → 回调页面 JS（多选） */
+        @JavascriptInterface
+        public void pick(final String mime, final String jsFunc) {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    pickJs = jsFunc;
+                    Intent i = new Intent(Intent.ACTION_GET_CONTENT);
+                    i.setType(mime == null || mime.isEmpty() ? "*/*" : mime);
+                    i.addCategory(Intent.CATEGORY_OPENABLE);
+                    i.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+                    try {
+                        startActivityForResult(Intent.createChooser(i, "选择文件"), REQ_APP_PICK);
+                    } catch (Exception e) {
+                        toast("无法打开文件选择器");
+                    }
+                }
+            });
+        }
+
         @JavascriptInterface
         public void savePng(String base64, String name) {
             try {
