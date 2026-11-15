@@ -259,6 +259,13 @@
   .txt-prev .tpt{font-size:11px; color:var(--ink-2); text-align:center; margin-top:4px}
   .comp-fab{display:none}   /* 仅竖屏显示（媒体查询内开启） */
   .comp-mask{display:none}  /* 竖屏抽屉打开时的点击遮罩 */
+  .comp-toast{
+    display:none; position:fixed; left:50%; bottom:74px; transform:translateX(-50%); z-index:45;
+    background:rgba(17,24,39,.88); color:#fff; font-size:13px; padding:9px 16px;
+    border-radius:99px; max-width:86vw; text-align:center; pointer-events:none;
+    box-shadow:0 8px 22px -10px rgba(17,24,39,.6);
+  }
+  .comp-toast.show{display:block}
   .comp-panel{
     width:330px; flex:none; overflow-y:auto; max-height:calc(100vh - 45px);
     background:var(--bg); border-left:1px solid var(--line); padding:14px;
@@ -659,6 +666,7 @@
     <div class="comp-inner"><canvas id="cvC" width="1080" height="1520"></canvas></div>
   </section>
   <button id="btnCompFab" class="comp-fab" type="button">⚙ 面板</button>
+  <div id="compToast" class="comp-toast"></div>
   <div id="compMask" class="comp-mask"></div>
   <aside class="comp-panel" id="compPanel">
     <div class="txt-prev"><canvas id="cvTxtPrev" width="240" height="320"></canvas><div class="tpt">当前文字框</div></div>
@@ -2616,7 +2624,16 @@
   var cvC = $('cvC');
   var compDrag = null;
 
-  function compMsg(t){ $('compMsg').textContent = t; }
+  // 提示同时写面板提示条 + 悬浮 toast（竖屏面板收起时也能看到关键信息）
+  var compToastTimer = null;
+  function compMsg(t){
+    $('compMsg').textContent = t;
+    var tc = $('compToast');
+    tc.textContent = t;
+    tc.classList.add('show');
+    if (compToastTimer) clearTimeout(compToastTimer);
+    compToastTimer = setTimeout(function(){ tc.classList.remove('show'); }, 4000);
+  }
 
   // 当前文字框小预览：切到合成页时按当前参数渲染（1x 导出缩放进卡片）
   function drawTextPrev(){
